@@ -49,8 +49,8 @@ Payload:
 🔧 Menjalankan
 
 ```bash
-git clone https://github.com/username/vlmrstool.git
-cd vlmrs-tool
+https://github.com/valmortheos/VlmrsTool.git
+cd VlmrsTool
 python -m http.server 8000
 ```
 
