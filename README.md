@@ -14,6 +14,58 @@ Secure client-side multi-file encoder & decoder dengan enkripsi AES-256-GCM. Sem
 - 🎨 **UI modern** — dark-mode friendly, responsive, dan intuitif
 - 🔄 **Drag & drop** — cukup seret file ke halaman
 
+## 🛠️ Instalasi Lokal
+
+### Prasyarat
+- Web browser modern (Chrome, Firefox, Safari, Edge)
+- Git (opsional, untuk clone)
+- Tidak perlu Node.js atau server — cukup buka file HTML langsung!
+
+### Langkah Instalasi
+
+#### Metode 1: Git Clone (Recommended)
+
+```bash
+# Clone repository
+git clone https://github.com/valmortheos/VlmrsTool.git
+
+# Masuk ke direktori
+cd VlmrsTool
+
+# Buka di browser default
+# Windows
+start index.html
+
+# macOS
+open index.html
+
+# Linux
+xdg-open index.html
+```
+
+#### Metode 2: Download ZIP
+
+1. Klik tombol **Code** → **Download ZIP** di GitHub
+2. Extract file ZIP ke folder manapun
+3. Buka `index.html` dengan double-click
+
+#### Metode 3: Local Server (Opsional)
+
+Jika ingin menggunakan local server (lebih direkomendasikan untuk development):
+
+```bash
+# Menggunakan Python 3
+python -m http.server 8080
+
+# Atau menggunakan Node.js
+npx serve .
+
+# Lalu buka di browser
+# http://localhost:8080
+```
+
+> 💡 **Tip**: Metode 1 atau 2 sudah cukup untuk penggunaan normal. Local server hanya diperlukan jika ingin development atau testing.
+
 ## 🚀 Cara Pakai
 
 ### Encode
