@@ -1,5 +1,6 @@
 import { VLMRS_CONSTANTS } from '../../../shared/constants.js';
 import { CryptoUtils } from '../../../shared/crypto-utils.js';
+import { UIUtils } from '../../../shared/ui-utils.js';
 import { HeaderManager } from './header-manager.js';
 
 export class VLMRSDecoder {
@@ -29,8 +30,15 @@ export class VLMRSDecoder {
 
     /**
      * Decrypts a .vlmrs file buffer (supports V1 and V2 Full/Transparent)
+     * @param {ArrayBuffer} buffer
+     * @param {string} password
+     * @param {Object} options - { customBaseName?: string, index?: number, totalFiles?: number, progressCallback?: function }
      */
-    static async decryptFile(buffer, password = '', progressCallback = null) {
+    static async decryptFile(buffer, password = '', options = {}) {
+        const { customBaseName = '', index = 0, totalFiles = 1, progressCallback = null } = (typeof options === 'function')
+            ? { progressCallback: options }
+            : options;
+
         if (progressCallback) progressCallback(10, "Parsing header...");
         const headerInfo = HeaderManager.parseHeader(buffer);
 
@@ -88,7 +96,6 @@ export class VLMRSDecoder {
             if (progressCallback) progressCallback(50, "Decrypting metadata...");
             const encMetaBytes = new Uint8Array(buffer, encMetaOffset, headerInfo.encryptedMetaLength);
 
-            // Reconstruct Header buffer for Metadata AAD
             let metaHeaderBuffer;
             if (headerInfo.version === 1) {
                 metaHeaderBuffer = HeaderManager.buildHeaderV1({
@@ -163,12 +170,12 @@ export class VLMRSDecoder {
 
         if (progressCallback) progressCallback(95, "Verifying checksum...");
 
-        // Determine filename & type
-        let filename = "decrypted_file";
+        // Determine original filename & type
+        let originalFilename = "decrypted_file";
         let mimeType = "application/octet-stream";
 
         if (decryptedMeta) {
-            filename = decryptedMeta.filename || filename;
+            originalFilename = decryptedMeta.filename || originalFilename;
             mimeType = decryptedMeta.type || mimeType;
 
             if (decryptedMeta.hash) {
@@ -180,15 +187,20 @@ export class VLMRSDecoder {
         } else if (headerInfo.plainMetaLength > 0) {
             const plainMetaBytes = new Uint8Array(buffer, plainMetaOffset, plainMetaLength);
             const plainMeta = JSON.parse(new TextDecoder().decode(plainMetaBytes));
-            filename = plainMeta.filename || filename;
+            originalFilename = plainMeta.filename || originalFilename;
             mimeType = plainMeta.mimeType || mimeType;
         }
+
+        // Get extension from original filename
+        const { ext } = UIUtils.getBaseAndExt(originalFilename);
+        const outputFilename = UIUtils.computeOutputFilename(originalFilename, customBaseName, index, totalFiles, ext);
 
         if (progressCallback) progressCallback(100, "Decryption Complete!");
 
         return {
             decryptedBuffer: decryptedFileBuffer,
-            filename,
+            filename: outputFilename,
+            originalFilename: originalFilename,
             mimeType,
             size: decryptedFileBuffer.byteLength,
             metadata: decryptedMeta || VLMRSDecoder.extractMetadata(buffer).plainMetadata

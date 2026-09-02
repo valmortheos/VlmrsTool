@@ -75,6 +75,22 @@
             <div id="enc-files-list" class="files-list"></div>
 
             <div id="enc-form" style="display: none;">
+                <!-- Filename Customization Option -->
+                <div class="filename-options-box">
+                    <div class="filename-options-title">Output Filename Option</div>
+                    <div class="filename-options-radios">
+                        <label>
+                            <input type="radio" name="enc-filename-mode" value="original" checked>
+                            Original Filename
+                        </label>
+                        <label>
+                            <input type="radio" name="enc-filename-mode" value="custom">
+                            Custom Filename
+                        </label>
+                    </div>
+                    <input type="text" id="enc-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled>
+                </div>
+
                 <div class="form-group">
                     <label for="enc-pass">Encryption Password</label>
                     <div class="input-wrapper">
@@ -102,9 +118,9 @@
             </div>
 
             <div id="enc-results-container" class="mt-4" style="display: none;">
-                <div class="flex justify-between items-center mb-3">
+                <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
                     <h3>Encoded Files</h3>
-                    <button id="btn-enc-download-zip" class="btn btn-success btn-sm">Download ZIP</button>
+                    <button id="btn-enc-download-zip" class="btn btn-success btn-sm">Download All (.ZIP)</button>
                 </div>
                 <div id="enc-results-list"></div>
             </div>
@@ -121,6 +137,22 @@
             <div id="dec-files-list" class="mb-3"></div>
 
             <div id="dec-form" style="display: none;">
+                <!-- Filename Customization Option -->
+                <div class="filename-options-box">
+                    <div class="filename-options-title">Output Filename Option</div>
+                    <div class="filename-options-radios">
+                        <label>
+                            <input type="radio" name="dec-filename-mode" value="original" checked>
+                            Original Filename
+                        </label>
+                        <label>
+                            <input type="radio" name="dec-filename-mode" value="custom">
+                            Custom Filename
+                        </label>
+                    </div>
+                    <input type="text" id="dec-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled>
+                </div>
+
                 <div class="form-group">
                     <label for="dec-pass">Decryption Password (if required)</label>
                     <div class="input-wrapper">
@@ -142,7 +174,10 @@
             </div>
 
             <div id="dec-results-container" class="mt-4" style="display: none;">
-                <h3 class="mb-3">Decrypted Output</h3>
+                <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+                    <h3>Decrypted Output</h3>
+                    <button id="btn-dec-download-zip" class="btn btn-success btn-sm">Download All (.ZIP)</button>
+                </div>
                 <div id="dec-results-list"></div>
             </div>
         </section>

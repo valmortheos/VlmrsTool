@@ -5,7 +5,7 @@ import { HistoryManager } from '../storage/history-manager.js';
 
 export class EncoderUI {
     constructor() {
-        this.selectedFiles = [];
+        this.fileQueue = [];
         this.selectedMode = 'full'; // 'full' or 'transparent'
         this.encodedResults = [];
         this.init();
@@ -49,6 +49,18 @@ export class EncoderUI {
             modeTransCard.addEventListener('click', () => this.setMode('transparent'));
         }
 
+        // Filename mode radio toggles
+        const filenameRadios = document.querySelectorAll('input[name="enc-filename-mode"]');
+        const customFilenameInput = document.getElementById('enc-custom-filename');
+        filenameRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (customFilenameInput) {
+                    customFilenameInput.disabled = (e.target.value !== 'custom');
+                    if (e.target.value === 'custom') customFilenameInput.focus();
+                }
+            });
+        });
+
         if (encodeBtn) {
             encodeBtn.addEventListener('click', () => this.startEncoding());
         }
@@ -79,39 +91,79 @@ export class EncoderUI {
     }
 
     handleFileSelect(files) {
-        this.selectedFiles = files;
-        this.renderSelectedFilesList();
+        // Large file warning check (>200MB)
+        const hasLargeFile = files.some(f => f.size > 200 * 1024 * 1024);
+        if (hasLargeFile) {
+            UIUtils.showToast("Files larger than 200MB may cause browser memory lag.", "warning", 5000);
+        }
+
+        // Push new files to Queue state
+        files.forEach(file => {
+            this.fileQueue.push({
+                file,
+                status: 'pending', // pending, processing, done, error
+                progress: 0,
+                error: null,
+                result: null
+            });
+        });
+
+        this.renderQueueDisplay();
 
         const encForm = document.getElementById('enc-form');
-        if (encForm) encForm.style.display = files.length > 0 ? 'block' : 'none';
+        if (encForm) encForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
     }
 
-    renderSelectedFilesList() {
+    renderQueueDisplay() {
         const container = document.getElementById('enc-files-list');
         if (!container) return;
         container.innerHTML = '';
 
-        this.selectedFiles.forEach((file, index) => {
-            const item = document.createElement('div');
-            item.className = 'file-item';
-            item.innerHTML = `
+        this.fileQueue.forEach((item, index) => {
+            const row = document.createElement('div');
+            row.className = 'file-item';
+
+            let badgeClass = 'badge-secondary';
+            let badgeText = '[Pending]';
+
+            if (item.status === 'processing') {
+                badgeClass = 'badge-warning';
+                badgeText = `[Processing ${item.progress}%]`;
+            } else if (item.status === 'done') {
+                badgeClass = 'badge-success';
+                badgeText = '[Done ✓]';
+            } else if (item.status === 'error') {
+                badgeClass = 'badge-danger';
+                badgeText = '[Error ✗]';
+            }
+
+            row.innerHTML = `
                 <div class="file-item-info">
-                    <strong>${file.name}</strong> (${UIUtils.formatBytes(file.size)})
+                    <strong class="file-name-truncate" title="${item.file.name}">${item.file.name}</strong>
+                    <div class="text-secondary text-sm">Size: ${UIUtils.formatBytes(item.file.size)} ${item.error ? `<span class="text-danger"> - ${item.error}</span>` : ''}</div>
                 </div>
-                <button class="btn btn-secondary btn-sm" data-index="${index}">Remove</button>
+                <span class="badge ${badgeClass}">${badgeText}</span>
+                ${item.status === 'pending' ? `<button class="btn btn-secondary btn-sm btn-remove-item" data-index="${index}" style="margin-left:0.5rem;">Remove</button>` : ''}
             `;
-            item.querySelector('button').addEventListener('click', (e) => {
-                const idx = parseInt(e.target.getAttribute('data-index'));
-                this.selectedFiles.splice(idx, 1);
-                this.handleFileSelect(this.selectedFiles);
-            });
-            container.appendChild(item);
+
+            const removeBtn = row.querySelector('.btn-remove-item');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    this.fileQueue.splice(index, 1);
+                    this.renderQueueDisplay();
+                    const encForm = document.getElementById('enc-form');
+                    if (encForm) encForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
+                });
+            }
+
+            container.appendChild(row);
         });
     }
 
     async startEncoding() {
-        if (!this.selectedFiles.length) {
-            UIUtils.showToast("Please select at least one file to encode.", "warning");
+        const pendingItems = this.fileQueue.filter(item => item.status === 'pending' || item.status === 'error');
+        if (!pendingItems.length) {
+            UIUtils.showToast("No pending files to encode in queue.", "warning");
             return;
         }
 
@@ -130,64 +182,108 @@ export class EncoderUI {
             }
         }
 
-        this.encodedResults = [];
-        const resultsContainer = document.getElementById('enc-results-container');
-        const resultsList = document.getElementById('enc-results-list');
-        if (resultsContainer) resultsContainer.style.display = 'block';
-        if (resultsList) resultsList.innerHTML = '';
+        // Custom Filename Mode check
+        const filenameRadio = document.querySelector('input[name="enc-filename-mode"]:checked');
+        const customFilenameInput = document.getElementById('enc-custom-filename');
+        const isCustomMode = filenameRadio && filenameRadio.value === 'custom';
+        const customBaseName = isCustomMode && customFilenameInput ? customFilenameInput.value.trim() : '';
 
-        for (let i = 0; i < this.selectedFiles.length; i++) {
-            const file = this.selectedFiles[i];
-            const currentPercentPrefix = Math.round((i / this.selectedFiles.length) * 100);
+        const resultsContainer = document.getElementById('enc-results-container');
+        if (resultsContainer) resultsContainer.style.display = 'block';
+
+        const totalQueue = this.fileQueue.length;
+
+        for (let i = 0; i < this.fileQueue.length; i++) {
+            const queueItem = this.fileQueue[i];
+            if (queueItem.status === 'done') continue; // skip already processed
+
+            queueItem.status = 'processing';
+            queueItem.progress = 0;
+            this.renderQueueDisplay();
 
             try {
-                const result = await VLMRSEncoder.encodeFile(file, {
+                const result = await VLMRSEncoder.encodeFile(queueItem.file, {
                     mode: this.selectedMode,
                     password: password,
+                    customBaseName: customBaseName,
+                    index: i,
+                    totalFiles: totalQueue,
                     progressCallback: (pct, msg) => {
-                        const totalPct = Math.round(currentPercentPrefix + (pct / this.selectedFiles.length));
-                        ProgressManager.updateProgress('enc', totalPct, `File ${i + 1}/${this.selectedFiles.length}: ${msg}`);
+                        queueItem.progress = pct;
+                        ProgressManager.updateProgress('enc', pct, `File ${i + 1}/${totalQueue}: ${msg}`);
+                        this.renderQueueDisplay();
                     }
                 });
 
+                queueItem.status = 'done';
+                queueItem.progress = 100;
+                queueItem.result = result;
                 this.encodedResults.push(result);
-                this.renderResultItem(result);
+
+                this.renderQueueDisplay();
+                this.renderResultCard(result);
 
                 await HistoryManager.addEntry({
                     action: 'Encode',
-                    filename: file.name,
+                    filename: queueItem.file.name,
                     outputFilename: result.outputFilename,
-                    size: file.size,
+                    size: queueItem.file.size,
                     mode: this.selectedMode
                 });
 
             } catch (err) {
                 console.error("Encoding error:", err);
-                UIUtils.showToast(`Error encoding ${file.name}: ${err.message}`, "danger");
+                queueItem.status = 'error';
+                queueItem.error = err.message;
+                this.renderQueueDisplay();
+                UIUtils.showToast(`Error encoding ${queueItem.file.name}: ${err.message}`, "danger");
             }
         }
 
         ProgressManager.hideProgress('enc');
-        UIUtils.showToast("Encoding completed successfully!", "success");
+        this.updateZipButtonLabel();
+        UIUtils.showToast("Batch encoding process completed!", "success");
     }
 
-    renderResultItem(result) {
+    renderResultCard(result) {
         const resultsList = document.getElementById('enc-results-list');
         if (!resultsList) return;
 
-        const item = document.createElement('div');
-        item.className = 'result-item card mb-2';
-        item.innerHTML = `
-            <div class="flex justify-between items-center">
+        const card = document.createElement('div');
+        card.className = 'card mb-3';
+
+        const modeBadge = result.mode === 'full' ? '<span class="badge badge-danger">FULL MODE</span>' : '<span class="badge badge-success">TRANSPARENT MODE</span>';
+
+        card.innerHTML = `
+            <div class="result-card-header">
                 <div>
-                    <strong>📁 ${result.outputFilename}</strong>
-                    <span class="badge ${result.mode === 'full' ? 'badge-danger' : 'badge-success'}">${result.mode.toUpperCase()} MODE</span>
+                    <strong>📁 <span class="card-display-filename">${result.outputFilename}</span></strong> ${modeBadge}
+                    <div class="text-secondary text-sm">Original: ${result.originalName}</div>
                 </div>
-                <button class="btn btn-primary btn-sm btn-download">Download .vlmrs</button>
+            </div>
+            <div class="form-group mb-2">
+                <label class="text-sm">Rename Result File:</label>
+                <div class="input-wrapper">
+                    <input type="text" class="input-control input-rename-card" value="${result.outputFilename}">
+                </div>
+            </div>
+            <div class="result-card-actions">
+                <button class="btn btn-primary btn-download-single">Download .vlmrs</button>
             </div>
         `;
 
-        item.querySelector('.btn-download').addEventListener('click', () => {
+        const renameInput = card.querySelector('.input-rename-card');
+        const displayFilename = card.querySelector('.card-display-filename');
+        renameInput.addEventListener('input', (e) => {
+            let val = e.target.value.trim();
+            if (!val.endsWith('.vlmrs')) {
+                val += '.vlmrs';
+            }
+            result.outputFilename = val;
+            displayFilename.innerText = val;
+        });
+
+        card.querySelector('.btn-download-single').addEventListener('click', () => {
             const blob = new Blob([result.encodedBuffer], { type: 'application/octet-stream' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -197,27 +293,56 @@ export class EncoderUI {
             URL.revokeObjectURL(url);
         });
 
-        resultsList.appendChild(item);
+        resultsList.appendChild(card);
+    }
+
+    updateZipButtonLabel() {
+        const btnZip = document.getElementById('btn-enc-download-zip');
+        if (!btnZip) return;
+
+        const totalCount = this.encodedResults.length;
+        const totalSize = this.encodedResults.reduce((acc, r) => acc + r.encodedBuffer.byteLength, 0);
+
+        if (totalCount > 0) {
+            btnZip.innerText = `Download All (.ZIP) - ${totalCount} file${totalCount > 1 ? 's' : ''} (${UIUtils.formatBytes(totalSize)})`;
+        } else {
+            btnZip.innerText = `Download All (.ZIP)`;
+        }
     }
 
     async downloadAllZip() {
-        if (!this.encodedResults.length) return;
+        if (!this.encodedResults.length) {
+            UIUtils.showToast("No processed files available for ZIP download", "warning");
+            return;
+        }
+
         if (typeof JSZip === 'undefined') {
             UIUtils.showToast("JSZip library not loaded", "danger");
             return;
         }
 
+        ProgressManager.updateProgress('enc', 20, "Creating ZIP archive...");
         const zip = new JSZip();
+
         this.encodedResults.forEach(res => {
             zip.file(res.outputFilename, res.encodedBuffer);
         });
 
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipBlob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+        });
+
+        ProgressManager.hideProgress('enc');
+
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `vlmrs_encrypted_files_${Date.now()}.zip`;
+        a.download = `vlmrs_encoded_bundle_${Date.now()}.zip`;
         a.click();
         URL.revokeObjectURL(url);
+
+        UIUtils.showToast("ZIP archive downloaded!", "success");
     }
 }

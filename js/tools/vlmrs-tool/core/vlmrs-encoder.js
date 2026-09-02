@@ -1,5 +1,6 @@
 import { VLMRS_CONSTANTS } from '../../../shared/constants.js';
 import { CryptoUtils } from '../../../shared/crypto-utils.js';
+import { UIUtils } from '../../../shared/ui-utils.js';
 import { HeaderManager } from './header-manager.js';
 import { MetadataManager } from './metadata-manager.js';
 
@@ -7,10 +8,10 @@ export class VLMRSEncoder {
     /**
      * Encodes a single file buffer into .vlmrs binary format (Version 2)
      * @param {File} file
-     * @param {Object} options - { mode: 'full'|'transparent', password?: string, deterministic?: boolean, progressCallback?: function }
+     * @param {Object} options - { mode: 'full'|'transparent', password?: string, customBaseName?: string, index?: number, totalFiles?: number, progressCallback?: function }
      */
     static async encodeFile(file, options) {
-        const { mode = 'full', password = '', deterministic = false, progressCallback } = options;
+        const { mode = 'full', password = '', customBaseName = '', index = 0, totalFiles = 1, progressCallback } = options;
         const isTransparent = mode === 'transparent';
         const modeByte = isTransparent ? VLMRS_CONSTANTS.MODE_TRANSPARENT : VLMRS_CONSTANTS.MODE_FULL;
         const iterations = isTransparent ? VLMRS_CONSTANTS.ITERATIONS_TRANSPARENT : VLMRS_CONSTANTS.ITERATIONS_FULL;
@@ -20,6 +21,9 @@ export class VLMRSEncoder {
 
         if (progressCallback) progressCallback(25, "Calculating checksums & keys...");
         const fileHashHex = await CryptoUtils.calculateSHA256Hex(fileBuffer);
+
+        // Compute output filename: original name without original extension + .vlmrs
+        const outputFilename = UIUtils.computeOutputFilename(file.name, customBaseName, index, totalFiles, '.vlmrs');
 
         // Generate Random IV
         const iv = crypto.getRandomValues(new Uint8Array(VLMRS_CONSTANTS.IV_LENGTH));
@@ -89,7 +93,6 @@ export class VLMRSEncoder {
             };
             const metaJsonBytes = new TextEncoder().encode(JSON.stringify(metadataObj));
 
-            // Temp header for Metadata AAD
             const tempHeaderForMetaAAD = HeaderManager.buildHeaderV2({
                 mode: modeByte,
                 saltLength: VLMRS_CONSTANTS.SALT_LENGTH,
@@ -153,7 +156,8 @@ export class VLMRSEncoder {
 
         return {
             encodedBuffer: resultBuffer.buffer,
-            outputFilename: `${file.name}.vlmrs`,
+            outputFilename: outputFilename,
+            originalName: file.name,
             mode: mode,
             plainMetadata: plainMetadataObj
         };

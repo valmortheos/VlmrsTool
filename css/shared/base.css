@@ -51,12 +51,15 @@ header p {
     font-size: 1rem;
 }
 
-/* Container */
+/* Container with Consistent Max Width & Safe Area Padding */
 .container {
     max-width: 900px;
     width: 100%;
     margin: 0 auto;
-    padding: 2rem 1rem;
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    padding-left: max(1.25rem, env(safe-area-inset-left));
+    padding-right: max(1.25rem, env(safe-area-inset-right));
     flex: 1;
 }
 

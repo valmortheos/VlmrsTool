@@ -23,7 +23,13 @@
     --text-secondary: #94a3b8;
     --text-muted: #64748b;
 
+    /* Standardized Card Design Tokens */
+    --card-border-width: 1px;
+    --card-border-color: var(--border-color);
+    --card-background: var(--bg-card);
+    --card-shadow: var(--shadow-md);
     --card-radius: 12px;
+
     --btn-radius: 8px;
     --input-radius: 8px;
     --transition-speed: 0.25s;
@@ -40,6 +46,9 @@
     --text-primary: #0f172a;
     --text-secondary: #475569;
     --text-muted: #94a3b8;
+
+    --card-border-color: var(--border-color);
+    --card-background: var(--bg-card);
 
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);

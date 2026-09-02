@@ -1,10 +1,10 @@
-/* Cards */
+/* Cards - Standardized using Design Tokens */
 .card {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-color);
+    background-color: var(--card-background);
+    border: var(--card-border-width) solid var(--card-border-color);
     border-radius: var(--card-radius);
     padding: 1.5rem;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--card-shadow);
     transition: background-color var(--transition-speed) ease, border-color var(--transition-speed) ease, transform var(--transition-speed) ease;
 }
 
@@ -22,6 +22,8 @@
     cursor: pointer;
     transition: all var(--transition-speed) ease;
     text-decoration: none;
+    position: relative;
+    z-index: 1;
 }
 
 .btn-primary {
@@ -59,6 +61,11 @@
 .btn-secondary:hover {
     background-color: var(--border-color);
     text-decoration: none;
+}
+
+.btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8125rem;
 }
 
 .btn:disabled {
@@ -124,7 +131,7 @@
 
 .modal-content {
     background-color: var(--bg-card);
-    border: 1px solid var(--border-color);
+    border: var(--card-border-width) solid var(--card-border-color);
     border-radius: var(--card-radius);
     width: 90%;
     max-width: 600px;

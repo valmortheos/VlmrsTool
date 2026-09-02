@@ -1,5 +1,5 @@
 /**
- * UI Utility Helpers (Toasts, Formatting, Password Toggles)
+ * UI Utility Helpers (Toasts, Formatting, Password Toggles, Filename Sanitization)
  */
 
 export class UIUtils {
@@ -49,11 +49,51 @@ export class UIUtils {
         btn.style.color = isPass ? 'var(--accent-color)' : 'var(--text-secondary)';
     }
 
-    static setStatus(elementId, state, message) {
-        const el = document.getElementById(elementId);
-        if (!el) return;
-        el.className = `status-message ${state}`;
-        el.innerText = message;
-        el.style.display = 'block';
+    static sanitizeFilename(name) {
+        if (!name) return 'file';
+        // Remove illegal filename characters
+        return name.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'file';
+    }
+
+    /**
+     * Extracts base name and extension from a filename
+     */
+    static getBaseAndExt(filename) {
+        if (!filename) return { base: 'file', ext: '' };
+        const lastDot = filename.lastIndexOf('.');
+        if (lastDot <= 0) {
+            return { base: filename, ext: '' };
+        }
+        return {
+            base: filename.substring(0, lastDot),
+            ext: filename.substring(lastDot) // includes dot, e.g. ".pdf"
+        };
+    }
+
+    /**
+     * Computes output filename according to encoder/decoder naming rules
+     * @param {string} originalFilename - e.g. "document.pdf" or "secret.vlmrs"
+     * @param {string} customBaseName - user provided custom base name
+     * @param {number} index - 0-based batch index
+     * @param {number} totalFiles - total count of files in batch
+     * @param {string} targetExtension - target extension including dot (e.g. ".vlmrs" or ".pdf")
+     */
+    static computeOutputFilename(originalFilename, customBaseName, index, totalFiles, targetExtension) {
+        let baseName = '';
+
+        if (customBaseName && customBaseName.trim().length > 0) {
+            const sanitized = UIUtils.sanitizeFilename(customBaseName.trim());
+            if (totalFiles > 1) {
+                baseName = `${sanitized}_${index + 1}`;
+            } else {
+                baseName = sanitized;
+            }
+        } else {
+            const parsed = UIUtils.getBaseAndExt(originalFilename);
+            baseName = parsed.base;
+        }
+
+        const ext = targetExtension.startsWith('.') ? targetExtension : '.' + targetExtension;
+        return `${baseName}${ext}`;
     }
 }
