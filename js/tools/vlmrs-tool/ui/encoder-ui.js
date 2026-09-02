@@ -22,9 +22,16 @@ export class EncoderUI {
         const modeTransCard = document.getElementById('mode-card-transparent');
         const encodeBtn = document.getElementById('btn-start-encode');
         const downloadZipBtn = document.getElementById('btn-enc-download-zip');
+        const passInput = document.getElementById('enc-pass');
 
         if (dropzone && fileInput) {
             dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    fileInput.click();
+                }
+            });
             dropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 dropzone.classList.add('dragover');
@@ -44,9 +51,34 @@ export class EncoderUI {
             });
         }
 
-        if (modeFullCard && modeTransCard) {
-            modeFullCard.addEventListener('click', () => this.setMode('full'));
-            modeTransCard.addEventListener('click', () => this.setMode('transparent'));
+        // Interactive Mode Selection Cards (Requirement 2)
+        const modeCards = [modeFullCard, modeTransCard].filter(Boolean);
+        modeCards.forEach(card => {
+            const mode = card.getAttribute('data-mode');
+            const selectCard = () => {
+                modeCards.forEach(c => {
+                    c.classList.remove('active', 'selected');
+                    c.setAttribute('aria-checked', 'false');
+                });
+                card.classList.add('active', 'selected');
+                card.setAttribute('aria-checked', 'true');
+                this.setMode(mode);
+            };
+
+            card.addEventListener('click', selectCard);
+            card.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    selectCard();
+                }
+            });
+        });
+
+        // Real-time Password Strength Meter (Requirement 3)
+        if (passInput) {
+            passInput.addEventListener('input', (e) => {
+                this.updatePasswordStrength(e.target.value);
+            });
         }
 
         // Filename mode radio toggles
@@ -70,21 +102,63 @@ export class EncoderUI {
         }
     }
 
+    updatePasswordStrength(password) {
+        const strengthBox = document.getElementById('password-strength-box');
+        const fillEl = document.getElementById('strength-fill');
+        const labelEl = document.getElementById('strength-label');
+
+        if (!strengthBox || !fillEl || !labelEl) return;
+
+        if (!password) {
+            strengthBox.style.display = 'none';
+            return;
+        }
+
+        strengthBox.style.display = 'block';
+
+        let score = 0;
+        if (password.length >= 8) score++;
+        if (password.length >= 12) score++;
+        if (/[a-z]/.test(password)) score++;
+        if (/[A-Z]/.test(password)) score++;
+        if (/[0-9]/.test(password)) score++;
+        if (/[^a-zA-Z0-9]/.test(password)) score++;
+
+        score = Math.min(score, 5);
+        const percent = (score / 5) * 100;
+
+        let label = 'Weak';
+        let color = '#EF4444';
+
+        if (score === 0 || score <= 2) {
+            label = 'Weak';
+            color = '#EF4444';
+        } else if (score === 3) {
+            label = 'Fair';
+            color = '#F59E0B';
+        } else if (score === 4) {
+            label = 'Good';
+            color = '#3B82F6';
+        } else if (score >= 5) {
+            label = 'Strong';
+            color = '#10B981';
+        }
+
+        fillEl.style.width = `${percent}%`;
+        fillEl.style.backgroundColor = color;
+        labelEl.innerText = `Password Strength: ${label}`;
+        labelEl.style.color = color;
+    }
+
     setMode(mode) {
         this.selectedMode = mode;
-        const fullCard = document.getElementById('mode-card-full');
-        const transCard = document.getElementById('mode-card-transparent');
         const passConfirmGroup = document.getElementById('enc-pass-confirm-group');
         const passHelp = document.getElementById('enc-pass-help');
 
         if (mode === 'full') {
-            fullCard.classList.add('selected');
-            transCard.classList.remove('selected');
             if (passConfirmGroup) passConfirmGroup.style.display = 'block';
             if (passHelp) passHelp.innerText = "Password required to encrypt all file metadata and content.";
         } else {
-            transCard.classList.add('selected');
-            fullCard.classList.remove('selected');
             if (passConfirmGroup) passConfirmGroup.style.display = 'none';
             if (passHelp) passHelp.innerText = "Password is optional. If left empty, deterministic key encryption will be generated.";
         }
@@ -141,7 +215,7 @@ export class EncoderUI {
                     <div class="text-secondary text-sm">Size: ${UIUtils.formatBytes(item.file.size)} ${item.error ? `<span class="text-danger"> - ${item.error}</span>` : ''}</div>
                 </div>
                 <span class="badge ${badgeClass}">${badgeText}</span>
-                ${item.status === 'pending' ? `<button class="btn btn-secondary btn-sm btn-remove-item" data-index="${index}" style="margin-left:0.5rem;">Remove</button>` : ''}
+                ${item.status === 'pending' ? `<button class="btn btn-secondary btn-sm btn-remove-item" data-index="${index}" style="margin-left:0.5rem;" aria-label="Remove ${item.file.name} from queue">Remove</button>` : ''}
             `;
 
             const removeBtn = row.querySelector('.btn-remove-item');
@@ -167,6 +241,7 @@ export class EncoderUI {
 
         const passInput = document.getElementById('enc-pass');
         const confirmPassInput = document.getElementById('enc-pass-confirm');
+        const encodeBtn = document.getElementById('btn-start-encode');
         const password = passInput ? passInput.value : '';
 
         if (this.selectedMode === 'full') {
@@ -180,11 +255,11 @@ export class EncoderUI {
             }
         }
 
-        // Output format selection: 'binary' or 'base64'
+        if (encodeBtn) encodeBtn.setAttribute('aria-busy', 'true');
+
         const outputFormatRadio = document.querySelector('input[name="enc-output-format"]:checked');
         const outputFormat = outputFormatRadio ? outputFormatRadio.value : 'binary';
 
-        // Custom Filename Mode check
         const filenameRadio = document.querySelector('input[name="enc-filename-mode"]:checked');
         const customFilenameInput = document.getElementById('enc-custom-filename');
         const isCustomMode = filenameRadio && filenameRadio.value === 'custom';
@@ -243,6 +318,7 @@ export class EncoderUI {
             }
         }
 
+        if (encodeBtn) encodeBtn.setAttribute('aria-busy', 'false');
         ProgressManager.hideProgress('enc');
         this.updateZipButtonLabel();
         UIUtils.showToast("Batch encoding process completed!", "success");
@@ -268,11 +344,11 @@ export class EncoderUI {
             <div class="form-group mb-2">
                 <label class="text-sm">Rename Result File:</label>
                 <div class="input-wrapper">
-                    <input type="text" class="input-control input-rename-card" value="${result.outputFilename}">
+                    <input type="text" class="input-control input-rename-card" value="${result.outputFilename}" aria-label="Rename output file">
                 </div>
             </div>
             <div class="result-card-actions">
-                <button class="btn btn-primary btn-download-single">Download Output File</button>
+                <button class="btn btn-primary btn-download-single" aria-label="Download ${result.outputFilename}">Download Output File</button>
             </div>
         `;
 

@@ -32,45 +32,35 @@
             <p>AES-256-GCM Secure Client-Side Encoder & Decoder</p>
         </header>
 
-        <div class="tabs">
-            <button class="tab-btn active" id="tab-encoder">Encoder</button>
-            <button class="tab-btn" id="tab-decoder">Decoder</button>
-            <button class="tab-btn" id="tab-history">History</button>
+        <div class="tabs" role="tablist" aria-label="Tool Navigation Tabs">
+            <button class="tab-btn active" id="tab-encoder" role="tab" aria-selected="true" aria-controls="view-encoder">Encoder</button>
+            <button class="tab-btn" id="tab-decoder" role="tab" aria-selected="false" aria-controls="view-decoder">Decoder</button>
+            <button class="tab-btn" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history">History</button>
         </div>
 
         <!-- ENCODER VIEW -->
-        <section id="view-encoder" class="view-section active card">
+        <section id="view-encoder" class="view-section active card" role="tabpanel" aria-labelledby="tab-encoder">
             <h2 class="mb-3">Mode Selection</h2>
-            <div class="mode-selection-grid">
-                <div class="mode-card mode-full selected" id="mode-card-full">
-                    <div class="mode-card-header">
-                        🔒 Full Encryption
-                    </div>
-                    <ul class="mode-card-list">
-                        <li>• Maximum security</li>
-                        <li>• All metadata hidden</li>
-                        <li>• Binary / Base64 text output</li>
-                        <li>• Password required</li>
-                    </ul>
+            <div class="mode-selector" role="radiogroup" aria-label="Encryption Mode Selection">
+                <div class="mode-card mode-full active selected" id="mode-card-full" data-mode="full" role="radio" aria-checked="true" tabindex="0" aria-label="Full Encryption Mode">
+                    <div class="mode-card-icon">🔒</div>
+                    <div class="mode-card-title">Full Encryption</div>
+                    <div class="mode-card-desc">Maximum security. All metadata hidden.</div>
+                    <div class="mode-card-badge">AES-256-GCM</div>
                 </div>
-                <div class="mode-card mode-transparent" id="mode-card-transparent">
-                    <div class="mode-card-header">
-                        👁️ Transparent Mode
-                    </div>
-                    <ul class="mode-card-list">
-                        <li>• Preview in app without pass</li>
-                        <li>• Filename & size visible</li>
-                        <li>• Content encrypted</li>
-                        <li>• Password optional</li>
-                    </ul>
+                <div class="mode-card mode-transparent" id="mode-card-transparent" data-mode="transparent" role="radio" aria-checked="false" tabindex="0" aria-label="Transparent Encryption Mode">
+                    <div class="mode-card-icon">👁️</div>
+                    <div class="mode-card-title">Transparent Mode</div>
+                    <div class="mode-card-desc">Preview without password. Content encrypted.</div>
+                    <div class="mode-card-badge">Preview Enabled</div>
                 </div>
             </div>
 
-            <div class="drop-zone" id="enc-dropzone">
+            <div class="drop-zone" id="enc-dropzone" role="button" tabindex="0" aria-label="Upload files - drag and drop or click to browse">
                 <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 <p>Drag & Drop multiple files here<br>or <span class="browse-text">Browse Files</span></p>
             </div>
-            <input type="file" id="enc-file" multiple class="hidden">
+            <input type="file" id="enc-file" multiple class="hidden" aria-label="Select files to encrypt">
 
             <div id="enc-files-list" class="files-list"></div>
 
@@ -78,7 +68,7 @@
                 <!-- Output Format Selector (Requirement 1) -->
                 <div class="filename-options-box mb-3">
                     <div class="filename-options-title">Output Format</div>
-                    <div class="filename-options-radios">
+                    <div class="filename-options-radios" role="radiogroup" aria-label="Output Format Selection">
                         <label>
                             <input type="radio" name="enc-output-format" value="binary" checked>
                             Binary (.vlmrs) - Default
@@ -93,7 +83,7 @@
                 <!-- Filename Customization Option -->
                 <div class="filename-options-box">
                     <div class="filename-options-title">Output Filename Option</div>
-                    <div class="filename-options-radios">
+                    <div class="filename-options-radios" role="radiogroup" aria-label="Output Filename Option">
                         <label>
                             <input type="radio" name="enc-filename-mode" value="original" checked>
                             Original Filename
@@ -103,31 +93,38 @@
                             Custom Filename
                         </label>
                     </div>
-                    <input type="text" id="enc-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled>
+                    <input type="text" id="enc-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled aria-label="Custom base filename">
                 </div>
 
-                <div class="form-group">
+                <div class="form-group mt-3">
                     <label for="enc-pass">Encryption Password</label>
                     <div class="input-wrapper">
-                        <input type="password" id="enc-pass" class="input-control" placeholder="Enter password">
-                        <button type="button" id="btn-toggle-enc-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;">Show</button>
+                        <input type="password" id="enc-pass" class="input-control" placeholder="Enter password" aria-label="Encryption password">
+                        <button type="button" id="btn-toggle-enc-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;" aria-label="Toggle password visibility">Show</button>
+                    </div>
+                    <!-- Password Strength Meter -->
+                    <div class="password-strength" id="password-strength-box" style="display: none;">
+                        <div class="strength-bar">
+                            <div class="strength-fill" id="strength-fill"></div>
+                        </div>
+                        <span class="strength-label" id="strength-label"></span>
                     </div>
                     <small id="enc-pass-help" class="text-secondary mt-1 display-block">Password required to encrypt all file metadata and content.</small>
                 </div>
 
                 <div class="form-group" id="enc-pass-confirm-group">
                     <label for="enc-pass-confirm">Confirm Password</label>
-                    <input type="password" id="enc-pass-confirm" class="input-control" placeholder="Confirm password">
+                    <input type="password" id="enc-pass-confirm" class="input-control" placeholder="Confirm password" aria-label="Confirm password">
                 </div>
 
-                <div class="progress-container" id="enc-progress-container">
+                <div class="progress-container" id="enc-progress-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Encryption progress">
                     <div class="progress-bar-bg">
                         <div class="progress-bar-fill" id="enc-progress-bar"></div>
                     </div>
                     <div class="progress-text" id="enc-progress-text">0%</div>
                 </div>
 
-                <button type="button" id="btn-start-encode" class="btn btn-primary mt-3" style="width: 100%;">
+                <button type="button" id="btn-start-encode" class="btn btn-primary mt-3" style="width: 100%;" aria-label="Encode all files" aria-busy="false">
                     Encode All Files
                 </button>
             </div>
@@ -135,17 +132,17 @@
             <div id="enc-results-container" class="mt-4" style="display: none;">
                 <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
                     <h3>Encoded Files</h3>
-                    <button id="btn-enc-download-zip" class="btn btn-success btn-sm">Download All (.ZIP)</button>
+                    <button id="btn-enc-download-zip" class="btn btn-success btn-sm" aria-label="Download all encoded files as ZIP archive">Download All (.ZIP)</button>
                 </div>
                 <div id="enc-results-list"></div>
             </div>
         </section>
 
         <!-- DECODER VIEW -->
-        <section id="view-decoder" class="view-section card">
+        <section id="view-decoder" class="view-section card" role="tabpanel" aria-labelledby="tab-decoder">
             <h2 class="mb-3">Decoder Mode</h2>
             <div class="filename-options-box mb-3">
-                <div class="filename-options-radios">
+                <div class="filename-options-radios" role="radiogroup" aria-label="Decoder Mode Toggle">
                     <label>
                         <input type="radio" name="decoder-action-mode" value="just-view" checked>
                         👁️ Just View (Auto-Preview)
@@ -157,11 +154,11 @@
                 </div>
             </div>
 
-            <div class="drop-zone" id="dec-dropzone">
+            <div class="drop-zone" id="dec-dropzone" role="button" tabindex="0" aria-label="Upload encrypted files - drag and drop or click to browse">
                 <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 <p>Drag & Drop .vlmrs or .txt files here<br>or <span class="browse-text">Browse Files</span></p>
             </div>
-            <input type="file" id="dec-file" multiple accept=".vlmrs,.txt" class="hidden">
+            <input type="file" id="dec-file" multiple accept=".vlmrs,.txt" class="hidden" aria-label="Select encrypted files to decode">
 
             <div id="dec-files-list" class="mb-3"></div>
 
@@ -169,7 +166,7 @@
                 <!-- Filename Customization Option -->
                 <div class="filename-options-box" id="dec-filename-options-box">
                     <div class="filename-options-title">Output Filename Option</div>
-                    <div class="filename-options-radios">
+                    <div class="filename-options-radios" role="radiogroup" aria-label="Decoded Output Filename Option">
                         <label>
                             <input type="radio" name="dec-filename-mode" value="original" checked>
                             Original Filename
@@ -179,25 +176,25 @@
                             Custom Filename
                         </label>
                     </div>
-                    <input type="text" id="dec-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled>
+                    <input type="text" id="dec-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled aria-label="Custom base filename">
                 </div>
 
                 <div class="form-group" id="dec-pass-group">
                     <label for="dec-pass">Decryption Password (if required)</label>
                     <div class="input-wrapper">
-                        <input type="password" id="dec-pass" class="input-control" placeholder="Enter password to decrypt content">
-                        <button type="button" id="btn-toggle-dec-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;">Show</button>
+                        <input type="password" id="dec-pass" class="input-control" placeholder="Enter password to decrypt content" aria-label="Decryption password">
+                        <button type="button" id="btn-toggle-dec-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;" aria-label="Toggle password visibility">Show</button>
                     </div>
                 </div>
 
-                <div class="progress-container" id="dec-progress-container">
+                <div class="progress-container" id="dec-progress-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Decryption progress">
                     <div class="progress-bar-bg">
                         <div class="progress-bar-fill" id="dec-progress-bar"></div>
                     </div>
                     <div class="progress-text" id="dec-progress-text">0%</div>
                 </div>
 
-                <button type="button" id="btn-start-decode" class="btn btn-success mt-3" style="width: 100%;">
+                <button type="button" id="btn-start-decode" class="btn btn-success mt-3" style="width: 100%;" aria-label="Start decoding files" aria-busy="false">
                     Decode Content & Preview
                 </button>
             </div>
@@ -205,23 +202,27 @@
             <div id="dec-results-container" class="mt-4" style="display: none;">
                 <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
                     <h3>Decrypted Output</h3>
-                    <button id="btn-dec-download-zip" class="btn btn-success btn-sm">Download All (.ZIP)</button>
+                    <button id="btn-dec-download-zip" class="btn btn-success btn-sm" aria-label="Download all decrypted files as ZIP archive">Download All (.ZIP)</button>
                 </div>
                 <div id="dec-results-list"></div>
             </div>
         </section>
 
         <!-- HISTORY VIEW -->
-        <section id="view-history" class="view-section card">
+        <section id="view-history" class="view-section card" role="tabpanel" aria-labelledby="tab-history">
             <div class="flex justify-between items-center mb-3">
                 <h2>Operation History</h2>
-                <button id="btn-clear-history" class="btn btn-danger btn-sm">Clear History</button>
+                <button id="btn-clear-history" class="btn btn-danger btn-sm" aria-label="Clear all operation history">Clear History</button>
             </div>
             <div id="history-list"></div>
         </section>
 
         <footer>
-            <p>VLMRS Tool Suite v2.0 — Encrypted Client-Side Storage</p>
+            <p>Created by <strong>Valmortheos</strong> — 100% Client-Side Processing</p>
+            <p class="mt-1 text-sm">
+                <a href="https://instagram.com/valmortheos" target="_blank" rel="noopener">Instagram: @valmortheos</a> |
+                <a href="https://github.com/valmortheos" target="_blank" rel="noopener">GitHub: @valmortheos</a>
+            </p>
         </footer>
     </div>
 

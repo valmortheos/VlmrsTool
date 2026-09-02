@@ -30,17 +30,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Tabs switching
+    // Tabs switching with ARIA accessibility updates (Requirement 5)
     const tabEncoder = document.getElementById('tab-encoder');
     const tabDecoder = document.getElementById('tab-decoder');
     const tabHistory = document.getElementById('tab-history');
 
     const switchTab = (tabName) => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const tabs = [tabEncoder, tabDecoder, tabHistory].filter(Boolean);
+        tabs.forEach(t => {
+            t.classList.remove('active');
+            t.setAttribute('aria-selected', 'false');
+        });
+
         document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
 
-        document.getElementById(`tab-${tabName}`).classList.add('active');
-        document.getElementById(`view-${tabName}`).classList.add('active');
+        const activeTab = document.getElementById(`tab-${tabName}`);
+        const activeView = document.getElementById(`view-${tabName}`);
+
+        if (activeTab) {
+            activeTab.classList.add('active');
+            activeTab.setAttribute('aria-selected', 'true');
+        }
+        if (activeView) {
+            activeView.classList.add('active');
+        }
 
         if (tabName === 'history') {
             loadHistoryDisplay();
@@ -76,16 +89,16 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = '';
         history.forEach(item => {
             const card = document.createElement('div');
-            card.className = 'card mb-2 flex justify-between items-center';
+            card.className = 'card mb-2 history-item-row';
             const dateStr = new Date(item.timestamp).toLocaleString();
-            const actionBadge = item.action === 'Encode' ? 'badge-primary' : 'badge-success';
 
             card.innerHTML = `
-                <div>
+                <div class="history-item-main">
                     <strong>${item.action}: ${item.filename}</strong>
                     <span class="badge ${item.action === 'Encode' ? 'badge-danger' : 'badge-success'}">${item.mode || 'FULL'}</span>
-                    <p class="text-secondary text-sm">${dateStr} | Size: ${UIUtils.formatBytes(item.size)}</p>
+                    <div class="text-secondary text-sm mt-1">Output: ${item.outputFilename} | Size: ${UIUtils.formatBytes(item.size)}</div>
                 </div>
+                <div class="history-timestamp">${dateStr}</div>
             `;
             container.appendChild(card);
         });

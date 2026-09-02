@@ -143,7 +143,9 @@ export class PreviewRenderer {
                 <tr><td><strong>Encryption Method:</strong></td><td>${encMethod}</td></tr>
                 <tr><td><strong>KDF Algorithm:</strong></td><td>${kdfAlgo} (${iterations.toLocaleString()} iterations)</td></tr>
                 <tr><td><strong>Password Protected:</strong></td><td>${passProtected}</td></tr>
-                <tr><td><strong>Tool Credit:</strong></td><td>Valmor Theos Secure (VLMRS Tool v2.0)</td></tr>
+                <tr><td><strong>Credit:</strong></td><td>Valmortheos</td></tr>
+                <tr><td><strong>Instagram:</strong></td><td><a href="https://instagram.com/valmortheos" target="_blank" rel="noopener">@valmortheos</a></td></tr>
+                <tr><td><strong>GitHub:</strong></td><td><a href="https://github.com/valmortheos" target="_blank" rel="noopener">@valmortheos</a></td></tr>
             </tbody>
         `;
 
