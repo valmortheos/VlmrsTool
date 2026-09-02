@@ -3,185 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VLMRS Encoder & Decoder - Multi-File Edition</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <title>VLMRS Tool Suite - Gateway</title>
+    <link rel="stylesheet" href="css/shared/variables.css">
+    <link rel="stylesheet" href="css/shared/base.css">
+    <link rel="stylesheet" href="css/shared/components.css">
+    <link rel="stylesheet" href="css/shared/utilities.css">
+    <link rel="stylesheet" href="css/gateway.css">
+    <link rel="stylesheet" href="css/tools/vlmrs-tool.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>
-                <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-                VLMRS Tool
-            </h1>
-            <p>Secure Client-Side Multi-File Encoder & Decoder</p>
+    <div class="container gateway-container">
+        <header class="gateway-hero">
+            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
+                <span id="theme-toggle-icon"></span>
+            </button>
+            <h1>VLMRS TOOL SUITE</h1>
+            <p>Secure Client-Side File Encryption & Utilities</p>
         </header>
 
-        <div class="tabs">
-            <button class="tab-btn active" id="tab-encoder" onclick="switchTab('encoder')">Encoder</button>
-            <button class="tab-btn" id="tab-decoder" onclick="switchTab('decoder')">Decoder</button>
-            <button class="tab-btn" id="tab-history" onclick="switchTab('history')">History</button>
-        </div>
-
-        <!-- ENCODER VIEW -->
-        <section id="view-encoder" class="view-section active card">
-            <div class="drop-zone" id="enc-dropzone">
-                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                <p>Drag & Drop multiple files here<br>or <span class="browse-text">Browse Files</span></p>
-            </div>
-            <input type="file" id="enc-file" multiple>
-
-            <div class="warning-box">
-                <strong>⚠️ Warning:</strong> Encrypting & Decrypting files larger than 200 MB may cause browser lag or freezing due to memory limitations.
-            </div>
-
-            <div id="enc-files-list" class="files-list"></div>
-
-            <div id="enc-form" style="display: none;">
-                <div class="form-group">
-                    <label for="enc-pass">Encryption Password</label>
-                    <div class="input-wrapper">
-                        <input type="password" id="enc-pass" placeholder="Create a strong password">
-                        <button type="button" class="toggle-password" onclick="togglePass('enc-pass', 'enc-pass-confirm', this)" title="Show/Hide">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                        </button>
+        <main>
+            <div class="tools-grid">
+                <!-- Active Tool Card: VLMRS v2 -->
+                <div class="card tool-card">
+                    <div>
+                        <div class="tool-card-header">
+                            <div class="tool-card-icon">
+                                <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                            </div>
+                            <span class="version-badge">v2.0</span>
+                        </div>
+                        <h2 class="tool-card-title">VLMRS Encoder/Decoder</h2>
+                        <p class="tool-card-desc">
+                            AES-256-GCM client-side multi-file encryption tool supporting both Full Mode and Transparent Mode with instant preview.
+                        </p>
                     </div>
+                    <a href="tools/vlmrs-tool.html" class="btn btn-primary mt-3" aria-label="Open VLMRS Encoder/Decoder Tool">
+                        Open Tool
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
+                    </a>
                 </div>
-                <div class="form-group">
-                    <label for="enc-pass-confirm">Confirm Password</label>
-                    <div class="input-wrapper">
-                        <input type="password" id="enc-pass-confirm" placeholder="Repeat password">
-                        <button type="button" class="toggle-password" onclick="togglePass('enc-pass', 'enc-pass-confirm', this)" title="Show/Hide">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                        </button>
+
+                <!-- Disabled Placeholder Tool Card -->
+                <div class="card tool-card disabled">
+                    <div>
+                        <div class="tool-card-header">
+                            <div class="tool-card-icon">
+                                <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.4-2.4c.4-.4.4-1 0-1.3z"/></svg>
+                            </div>
+                            <span class="version-badge">Coming Soon</span>
+                        </div>
+                        <h2 class="tool-card-title">Future Tool Placeholder</h2>
+                        <p class="tool-card-desc">
+                            Additional security, cryptography, and client-side utilities will be available here in future releases.
+                        </p>
                     </div>
-                </div>
-                <button id="enc-btn" class="btn" onclick="startEncoding()">Encode All Files</button>
-            </div>
-
-            <div id="enc-progress-area" class="progress-area" style="display: none;">
-                <div class="progress-header">
-                    <span id="enc-progress-text">Processing...</span>
-                    <span id="enc-progress-percentage">0%</span>
-                </div>
-                <div class="progress-bar-container">
-                    <div class="progress-bar" id="enc-progress-bar"></div>
-                </div>
-            </div>
-
-            <div id="enc-download-area" style="display: none; margin-top: 1.5rem;">
-                <h3 style="margin-bottom:1rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
-                    ✅ Files Ready - Download Options
-                </h3>
-                
-                <!-- Bulk Download Buttons -->
-                <div class="bulk-download-actions" style="margin-bottom: 1.5rem;">
-                    <button class="btn btn-outline" onclick="downloadAllAsZip('enc')" style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z"/></svg>
-                        Download All as ZIP
-                    </button>
-                    <button class="btn btn-outline" onclick="downloadAllIndividually('enc')" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                        Download All Individually
+                    <button class="btn btn-secondary mt-3" disabled aria-disabled="true">
+                        Disabled
                     </button>
                 </div>
-                
-                <div class="rename-options">
-                    <div class="rename-option-header">
-                        <span class="rename-label">Individual Files</span>
-                        <span class="rename-label">Action</span>
-                    </div>
-                    <div id="enc-download-buttons" class="download-buttons"></div>
-                </div>
             </div>
+        </main>
 
-            <div id="enc-status" class="status-message"></div>
-            <button id="enc-reset" class="btn btn-outline" style="display:none;" onclick="resetEncoder()">Process More Files</button>
-        </section>
-
-        <!-- DECODER VIEW -->
-        <section id="view-decoder" class="view-section card">
-            <div class="drop-zone" id="dec-dropzone">
-                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                <p>Drag & Drop .vlmrs files here<br>or <span class="browse-text">Browse Files</span></p>
-            </div>
-            <input type="file" id="dec-file" accept=".vlmrs" multiple>
-
-            <div id="dec-files-list" class="files-list"></div>
-
-            <div id="dec-form" style="display: none;">
-                <div class="form-group">
-                    <label for="dec-pass">Password</label>
-                    <div class="input-wrapper">
-                        <input type="password" id="dec-pass" placeholder="Enter decryption password">
-                        <button type="button" class="toggle-password" onclick="togglePass('dec-pass', null, this)" title="Show/Hide">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                        </button>
-                    </div>
-                </div>
-                <button id="dec-btn" class="btn" onclick="startDecoding()">Decode & Preview All</button>
-            </div>
-
-            <div id="dec-progress-area" class="progress-area" style="display: none;">
-                <div class="progress-header">
-                    <span id="dec-progress-text">Processing...</span>
-                    <span id="dec-progress-percentage">0%</span>
-                </div>
-                <div class="progress-bar-container">
-                    <div class="progress-bar" id="dec-progress-bar"></div>
-                </div>
-            </div>
-
-            <div id="dec-download-area" style="display: none; margin-top: 1.5rem;">
-                <h3 style="margin-bottom:1rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
-                    ✅ Files Ready - Download Options
-                </h3>
-                
-                <!-- Bulk Download Buttons -->
-                <div class="bulk-download-actions" style="margin-bottom: 1.5rem;">
-                    <button class="btn btn-outline" onclick="downloadAllAsZip('dec')" style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z"/></svg>
-                        Download All as ZIP
-                    </button>
-                    <button class="btn btn-outline" onclick="downloadAllIndividually('dec')" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                        Download All Individually
-                    </button>
-                </div>
-                
-                <div class="rename-options">
-                    <div class="rename-option-header">
-                        <span class="rename-label">Individual Files</span>
-                        <span class="rename-label">Action</span>
-                    </div>
-                    <div id="dec-download-buttons" class="download-buttons"></div>
-                </div>
-            </div>
-
-            <div id="dec-preview-area" style="display: none; margin-top: 1.5rem;">
-                <h3 style="margin-bottom:0.75rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">File Previews & Details</h3>
-                <div id="dec-preview-list" class="preview-list"></div>
-            </div>
-
-            <div id="dec-status" class="status-message"></div>
-            <button id="dec-reset" class="btn btn-outline" style="display:none;" onclick="resetDecoder()">Process More Files</button>
-        </section>
-
-        <!-- HISTORY VIEW -->
-        <section id="view-history" class="view-section card">
-            <div class="history-header">
-                <h2>Operation History</h2>
-                <button class="btn-outline" onclick="clearHistory()" style="margin:0; padding:0.5rem 1rem;">Clear History</button>
-            </div>
-            <div id="history-list" class="history-list"></div>
-        </section>
-
-        <div class="privacy-note">
-            <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
-            Your files never leave this device. Security depends on your password strength.
-        </div>
+        <footer class="footer-credit">
+            <p>Created by <strong>Valmortheos</strong></p>
+            <p>
+                <a href="https://instagram.com/valmortheos" target="_blank" rel="noopener">📸 @valmortheos</a>
+                <a href="https://github.com/valmortheos" target="_blank" rel="noopener">💻 @valmortheos</a>
+            </p>
+        </footer>
     </div>
 
-    <script src="script.js"></script>
+    <script type="module" src="js/gateway.js"></script>
 </body>
 </html>
