@@ -17,7 +17,7 @@ export class PreviewRenderer {
 
         const title = document.createElement('div');
         title.className = 'preview-title';
-        title.innerHTML = `<strong>📁 ${fullFilename}</strong> <span class="badge badge-success">Transparent Mode</span>`;
+        title.innerHTML = `<strong class="file-name" title="${fullFilename}">📁 ${fullFilename}</strong> <span class="badge badge-success">Transparent Mode</span>`;
         card.appendChild(title);
 
         const previewContent = document.createElement('div');
@@ -99,7 +99,7 @@ export class PreviewRenderer {
     }
 
     /**
-     * Builds standard Metadata Table displaying ALL required fields
+     * Builds standard Metadata Table displaying ALL required fields with YYYY-MM-DD HH:MM:SS timestamp and hash wrapping
      */
     static buildMetadataTable(meta = {}, headerInfo = null, fallbackSize = 0, fallbackFilename = '', fallbackMime = '') {
         const details = document.createElement('details');
@@ -118,7 +118,7 @@ export class PreviewRenderer {
         const mimeType = meta.mimeType || meta.type || fallbackMime || 'application/octet-stream';
         const size = meta.size || fallbackSize;
         const hash = meta.hash || 'Verified via AES-GCM tag';
-        const timestamp = meta.timestamp ? new Date(meta.timestamp).toLocaleString() : 'N/A';
+        const formattedTimestamp = meta.timestamp ? UIUtils.formatTimestamp(meta.timestamp) : 'N/A';
         const vlmrsVersion = meta.vlmrsVersion || (headerInfo ? headerInfo.version : 2);
         const mode = meta.mode ? meta.mode.toUpperCase() : (headerInfo && headerInfo.mode === 1 ? 'TRANSPARENT' : 'FULL');
         const encMethod = encInfo.method || 'AES-256-GCM';
@@ -132,20 +132,20 @@ export class PreviewRenderer {
         table.className = 'metadata-table mt-2';
         table.innerHTML = `
             <tbody>
-                <tr><td><strong>Original Filename:</strong></td><td>${filename}</td></tr>
+                <tr><td><strong>Original Filename:</strong></td><td><span class="file-name" title="${filename}">${filename}</span></td></tr>
                 <tr><td><strong>File Extension:</strong></td><td><code>${extension}</code></td></tr>
                 <tr><td><strong>MIME Type:</strong></td><td><code>${mimeType}</code></td></tr>
                 <tr><td><strong>File Size:</strong></td><td>${UIUtils.formatBytes(size)} (${size} bytes)</td></tr>
-                <tr><td><strong>SHA-256 Hash:</strong></td><td><code class="hash-text">${hash}</code></td></tr>
-                <tr><td><strong>Encryption Timestamp:</strong></td><td>${timestamp}</td></tr>
+                <tr><td><strong>SHA-256 Hash:</strong></td><td><code class="hash-value">${hash}</code></td></tr>
+                <tr><td><strong>Encryption Timestamp:</strong></td><td>${formattedTimestamp}</td></tr>
                 <tr><td><strong>VLMRS Version:</strong></td><td>v${vlmrsVersion}.0</td></tr>
                 <tr><td><strong>Encryption Mode:</strong></td><td><strong>${mode}</strong></td></tr>
                 <tr><td><strong>Encryption Method:</strong></td><td>${encMethod}</td></tr>
                 <tr><td><strong>KDF Algorithm:</strong></td><td>${kdfAlgo} (${iterations.toLocaleString()} iterations)</td></tr>
                 <tr><td><strong>Password Protected:</strong></td><td>${passProtected}</td></tr>
                 <tr><td><strong>Credit:</strong></td><td>Valmortheos</td></tr>
-                <tr><td><strong>Instagram:</strong></td><td><a href="https://instagram.com/valmortheos" target="_blank" rel="noopener">@valmortheos</a></td></tr>
-                <tr><td><strong>GitHub:</strong></td><td><a href="https://github.com/valmortheos" target="_blank" rel="noopener">@valmortheos</a></td></tr>
+                <tr><td><strong>Instagram:</strong></td><td><a href="https://instagram.com/valmortheos" target="_blank" rel="noopener">📸 @valmortheos</a></td></tr>
+                <tr><td><strong>GitHub:</strong></td><td><a href="https://github.com/valmortheos" target="_blank" rel="noopener">💻 @valmortheos</a></td></tr>
             </tbody>
         `;
 

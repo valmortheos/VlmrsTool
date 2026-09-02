@@ -1,5 +1,5 @@
 /**
- * UI Utility Helpers (Toasts, Formatting, Password Toggles, Filename Sanitization)
+ * UI Utility Helpers (Toasts, Formatting, Password Toggles, Filename Sanitization, Timestamp Formatting)
  */
 
 export class UIUtils {
@@ -8,6 +8,19 @@ export class UIUtils {
         const k = 1024, sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    static formatTimestamp(ts) {
+        if (!ts) return 'N/A';
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) return 'N/A';
+        const YYYY = d.getFullYear();
+        const MM = String(d.getMonth() + 1).padStart(2, '0');
+        const DD = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}`;
     }
 
     static showToast(message, type = 'info', duration = 3000) {
@@ -51,13 +64,9 @@ export class UIUtils {
 
     static sanitizeFilename(name) {
         if (!name) return 'file';
-        // Remove illegal filename characters
         return name.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'file';
     }
 
-    /**
-     * Extracts base name and extension from a filename
-     */
     static getBaseAndExt(filename) {
         if (!filename) return { base: 'file', ext: '' };
         const lastDot = filename.lastIndexOf('.');
@@ -66,18 +75,10 @@ export class UIUtils {
         }
         return {
             base: filename.substring(0, lastDot),
-            ext: filename.substring(lastDot) // includes dot, e.g. ".pdf"
+            ext: filename.substring(lastDot)
         };
     }
 
-    /**
-     * Computes output filename according to encoder/decoder naming rules
-     * @param {string} originalFilename - e.g. "document.pdf" or "secret.vlmrs"
-     * @param {string} customBaseName - user provided custom base name
-     * @param {number} index - 0-based batch index
-     * @param {number} totalFiles - total count of files in batch
-     * @param {string} targetExtension - target extension including dot (e.g. ".vlmrs" or ".pdf")
-     */
     static computeOutputFilename(originalFilename, customBaseName, index, totalFiles, targetExtension) {
         let baseName = '';
 

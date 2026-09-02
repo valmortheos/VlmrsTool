@@ -24,6 +24,12 @@ export class DecoderUI {
 
         if (dropzone && fileInput) {
             dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    fileInput.click();
+                }
+            });
             dropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 dropzone.classList.add('dragover');
@@ -175,7 +181,7 @@ export class DecoderUI {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="badge ${badgeClass}">${badgeText}</span>
-                    <button class="btn btn-secondary btn-sm btn-remove-dec" data-index="${index}">Remove</button>
+                    <button class="btn btn-secondary btn-sm btn-remove-dec" data-index="${index}" aria-label="Remove ${item.file.name}">Remove</button>
                 </div>
             `;
 
@@ -225,7 +231,10 @@ export class DecoderUI {
         }
 
         const passInput = document.getElementById('dec-pass');
+        const decodeBtn = document.getElementById('btn-start-decode');
         const password = passInput ? passInput.value : '';
+
+        if (decodeBtn) decodeBtn.setAttribute('aria-busy', 'true');
 
         const filenameRadio = document.querySelector('input[name="dec-filename-mode"]:checked');
         const customFilenameInput = document.getElementById('dec-custom-filename');
@@ -282,6 +291,7 @@ export class DecoderUI {
             }
         }
 
+        if (decodeBtn) decodeBtn.setAttribute('aria-busy', 'false');
         ProgressManager.hideProgress('dec');
         this.updateZipButtonLabel();
         UIUtils.showToast("Batch decoding process completed!", "success");
@@ -299,19 +309,19 @@ export class DecoderUI {
         card.innerHTML = `
             <div class="result-card-header">
                 <div>
-                    <strong>📄 Original: ${result.originalFilename}</strong> (${UIUtils.formatBytes(result.size)})
-                    <div class="text-secondary text-sm">Output name: <span class="card-display-filename">${result.filename}</span></div>
+                    <strong>📄 Original: <span class="file-name" title="${result.originalFilename}">${result.originalFilename}</span></strong> (${UIUtils.formatBytes(result.size)})
+                    <div class="text-secondary text-sm">Output name: <span class="card-display-filename file-name" title="${result.filename}">${result.filename}</span></div>
                 </div>
             </div>
             <div class="form-group mb-2">
                 <label class="text-sm">Rename Decrypted File:</label>
                 <div class="input-wrapper">
-                    <input type="text" class="input-control input-rename-card" value="${result.filename}">
+                    <input type="text" class="input-control input-rename-card" value="${result.filename}" aria-label="Rename decrypted file">
                 </div>
             </div>
             <div class="decrypted-preview-slot"></div>
             <div class="result-card-actions">
-                <button class="btn btn-success btn-download-single">Download Decrypted File</button>
+                <button class="btn btn-success btn-download-single" aria-label="Download ${result.filename}">Download</button>
             </div>
         `;
 
@@ -327,6 +337,7 @@ export class DecoderUI {
             }
             result.filename = val;
             displayFilename.innerText = val;
+            displayFilename.setAttribute('title', val);
         });
 
         card.querySelector('.btn-download-single').addEventListener('click', () => {

@@ -74,7 +74,7 @@ export class EncoderUI {
             });
         });
 
-        // Real-time Password Strength Meter (Requirement 3)
+        // Real-time Password Strength Meter (Requirement 3 with Icons)
         if (passInput) {
             passInput.addEventListener('input', (e) => {
                 this.updatePasswordStrength(e.target.value);
@@ -125,29 +125,22 @@ export class EncoderUI {
         if (/[^a-zA-Z0-9]/.test(password)) score++;
 
         score = Math.min(score, 5);
-        const percent = (score / 5) * 100;
 
-        let label = 'Weak';
-        let color = '#EF4444';
+        const strengthMap = {
+            0: { width: '0%',   color: 'transparent', text: '',           icon: '' },
+            1: { width: '20%',  color: '#EF4444',     text: 'Very Weak',  icon: '⚠️' },
+            2: { width: '40%',  color: '#F59E0B',     text: 'Weak',       icon: '⚡' },
+            3: { width: '60%',  color: '#3B82F6',     text: 'Fair',       icon: '👍' },
+            4: { width: '80%',  color: '#10B981',     text: 'Good',       icon: '✅' },
+            5: { width: '100%', color: '#059669',     text: 'Strong',     icon: '🛡️' }
+        };
 
-        if (score === 0 || score <= 2) {
-            label = 'Weak';
-            color = '#EF4444';
-        } else if (score === 3) {
-            label = 'Fair';
-            color = '#F59E0B';
-        } else if (score === 4) {
-            label = 'Good';
-            color = '#3B82F6';
-        } else if (score >= 5) {
-            label = 'Strong';
-            color = '#10B981';
-        }
+        const current = strengthMap[score] || strengthMap[1];
 
-        fillEl.style.width = `${percent}%`;
-        fillEl.style.backgroundColor = color;
-        labelEl.innerText = `Password Strength: ${label}`;
-        labelEl.style.color = color;
+        fillEl.style.width = current.width;
+        fillEl.style.backgroundColor = current.color;
+        labelEl.innerText = `${current.icon} Strength: ${current.text}`;
+        labelEl.style.color = current.color;
     }
 
     setMode(mode) {
@@ -337,8 +330,8 @@ export class EncoderUI {
         card.innerHTML = `
             <div class="result-card-header">
                 <div>
-                    <strong>📁 <span class="card-display-filename">${result.outputFilename}</span></strong> ${modeBadge} ${formatBadge}
-                    <div class="text-secondary text-sm">Original: ${result.originalName}</div>
+                    <strong>📁 <span class="card-display-filename file-name" title="${result.outputFilename}">${result.outputFilename}</span></strong> ${modeBadge} ${formatBadge}
+                    <div class="text-secondary text-sm">Original: <span class="file-name" title="${result.originalName}">${result.originalName}</span></div>
                 </div>
             </div>
             <div class="form-group mb-2">
@@ -348,7 +341,7 @@ export class EncoderUI {
                 </div>
             </div>
             <div class="result-card-actions">
-                <button class="btn btn-primary btn-download-single" aria-label="Download ${result.outputFilename}">Download Output File</button>
+                <button class="btn btn-primary btn-download-single" aria-label="Download ${result.outputFilename}">Download</button>
             </div>
         `;
 
@@ -363,6 +356,7 @@ export class EncoderUI {
             }
             result.outputFilename = val;
             displayFilename.innerText = val;
+            displayFilename.setAttribute('title', val);
         });
 
         card.querySelector('.btn-download-single').addEventListener('click', () => {
