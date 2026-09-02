@@ -5,6 +5,50 @@ import { HeaderManager } from './header-manager.js';
 
 export class VLMRSDecoder {
     /**
+     * Auto-detects whether file buffer is wrapped Base64 text (.txt) or binary (.vlmrs)
+     */
+    static async detectAndNormalizeBuffer(buffer) {
+        const uint8 = new Uint8Array(buffer);
+        const textDecoder = new TextDecoder();
+        const textStart = textDecoder.decode(uint8.subarray(0, 50));
+
+        if (textStart.includes('-----BEGIN VLMRS')) {
+            const textContent = textDecoder.decode(uint8);
+            return VLMRSDecoder.parseBase64Text(textContent);
+        }
+
+        // Check binary magic bytes "VLMR"
+        if (uint8[0] === 86 && uint8[1] === 76 && uint8[2] === 77 && uint8[3] === 82) {
+            return buffer;
+        }
+
+        // Check if raw base64 string
+        if (/^[A-Za-z0-9+/=\s]+$/.test(textStart)) {
+            const textContent = textDecoder.decode(uint8);
+            return VLMRSDecoder.parseBase64Text(textContent);
+        }
+
+        throw new Error('Unknown or corrupted VLMRS file format');
+    }
+
+    /**
+     * Parses Base64 wrapped text content into ArrayBuffer
+     */
+    static parseBase64Text(text) {
+        let base64String = text;
+        const match = text.match(/-----BEGIN VLMRS v2-----\s*([\s\S]+?)\s*-----END VLMRS v2-----/);
+
+        if (match) {
+            base64String = match[1];
+        }
+
+        // Remove all whitespaces and line breaks
+        base64String = base64String.replace(/\s+/g, '');
+        const bytes = CryptoUtils.base64ToBuffer(base64String);
+        return bytes.buffer;
+    }
+
+    /**
      * Extracts header info and plain metadata (if Mode B or V2) without requiring password
      */
     static extractMetadata(buffer) {
@@ -29,17 +73,18 @@ export class VLMRSDecoder {
     }
 
     /**
-     * Decrypts a .vlmrs file buffer (supports V1 and V2 Full/Transparent)
-     * @param {ArrayBuffer} buffer
+     * Decrypts a .vlmrs or .txt file buffer (supports V1 and V2 Full/Transparent, Binary and Base64)
+     * @param {ArrayBuffer} rawBuffer
      * @param {string} password
      * @param {Object} options - { customBaseName?: string, index?: number, totalFiles?: number, progressCallback?: function }
      */
-    static async decryptFile(buffer, password = '', options = {}) {
+    static async decryptFile(rawBuffer, password = '', options = {}) {
         const { customBaseName = '', index = 0, totalFiles = 1, progressCallback = null } = (typeof options === 'function')
             ? { progressCallback: options }
             : options;
 
-        if (progressCallback) progressCallback(10, "Parsing header...");
+        if (progressCallback) progressCallback(5, "Detecting format & parsing header...");
+        const buffer = await VLMRSDecoder.detectAndNormalizeBuffer(rawBuffer);
         const headerInfo = HeaderManager.parseHeader(buffer);
 
         let offset = headerInfo.payloadOffset;
@@ -177,7 +222,6 @@ export class VLMRSDecoder {
         let origExt = activeMeta.extension || "";
         let mimeType = activeMeta.mimeType || activeMeta.type || "application/octet-stream";
 
-        // Fallback if extension is embedded in origBase
         if (!origExt && origBase.includes('.')) {
             const parsed = UIUtils.getBaseAndExt(origBase);
             origBase = parsed.base;

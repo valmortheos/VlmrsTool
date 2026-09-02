@@ -6,12 +6,12 @@ import { MetadataManager } from './metadata-manager.js';
 
 export class VLMRSEncoder {
     /**
-     * Encodes a single file buffer into .vlmrs binary format (Version 2)
+     * Encodes a single file buffer into .vlmrs binary or .txt wrapped base64 format (Version 2)
      * @param {File} file
-     * @param {Object} options - { mode: 'full'|'transparent', password?: string, customBaseName?: string, index?: number, totalFiles?: number, progressCallback?: function }
+     * @param {Object} options - { mode: 'full'|'transparent', outputFormat: 'binary'|'base64', password?: string, customBaseName?: string, index?: number, totalFiles?: number, progressCallback?: function }
      */
     static async encodeFile(file, options) {
-        const { mode = 'full', password = '', customBaseName = '', index = 0, totalFiles = 1, progressCallback } = options;
+        const { mode = 'full', outputFormat = 'binary', password = '', customBaseName = '', index = 0, totalFiles = 1, progressCallback } = options;
         const isTransparent = mode === 'transparent';
         const modeByte = isTransparent ? VLMRS_CONSTANTS.MODE_TRANSPARENT : VLMRS_CONSTANTS.MODE_FULL;
         const iterations = isTransparent ? VLMRS_CONSTANTS.ITERATIONS_TRANSPARENT : VLMRS_CONSTANTS.ITERATIONS_FULL;
@@ -22,9 +22,10 @@ export class VLMRSEncoder {
         if (progressCallback) progressCallback(25, "Calculating checksums & keys...");
         const fileHashHex = await CryptoUtils.calculateSHA256Hex(fileBuffer);
 
-        // Strip original extension before adding .vlmrs
+        // Compute output filename: strip original extension, apply .txt for base64 format or .vlmrs for binary
+        const targetExt = outputFormat === 'base64' ? '.txt' : '.vlmrs';
         const { base: originalBase, ext: originalExt } = UIUtils.getBaseAndExt(file.name);
-        const outputFilename = UIUtils.computeOutputFilename(file.name, customBaseName, index, totalFiles, '.vlmrs');
+        const outputFilename = UIUtils.computeOutputFilename(file.name, customBaseName, index, totalFiles, targetExt);
 
         // Generate Random IV
         const iv = crypto.getRandomValues(new Uint8Array(VLMRS_CONSTANTS.IV_LENGTH));
@@ -165,13 +166,30 @@ export class VLMRSEncoder {
 
         resultBuffer.set(fileCiphertextBytes, offset);
 
+        if (progressCallback) progressCallback(95, "Formatting output...");
+
+        let finalPayload;
+        let mimeType;
+
+        if (outputFormat === 'base64') {
+            const base64String = CryptoUtils.bufferToBase64(resultBuffer.buffer);
+            const chunks = base64String.match(/.{1,76}/g) || [];
+            const wrappedBase64 = `-----BEGIN VLMRS v2-----\n${chunks.join('\n')}\n-----END VLMRS v2-----`;
+            finalPayload = new TextEncoder().encode(wrappedBase64).buffer;
+            mimeType = 'text/plain';
+        } else {
+            finalPayload = resultBuffer.buffer;
+            mimeType = 'application/x-vlmrs';
+        }
+
         if (progressCallback) progressCallback(100, "Complete!");
 
         return {
-            encodedBuffer: resultBuffer.buffer,
+            encodedBuffer: finalPayload,
             outputFilename: outputFilename,
             originalName: file.name,
-            mimeType: "application/x-vlmrs",
+            mimeType: mimeType,
+            outputFormat: outputFormat,
             mode: mode,
             plainMetadata: plainMetadataObj
         };

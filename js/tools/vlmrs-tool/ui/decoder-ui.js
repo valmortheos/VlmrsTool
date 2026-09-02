@@ -81,14 +81,13 @@ export class DecoderUI {
         if (this.actionMode === 'just-view') {
             if (decPassGroup) decPassGroup.style.display = 'none';
             if (decFilenameOptionsBox) decFilenameOptionsBox.style.display = 'none';
-            if (decForm) decForm.style.display = 'none'; // Auto-preview works without form submit
+            if (decForm) decForm.style.display = 'none';
         } else {
             if (decPassGroup) decPassGroup.style.display = 'block';
             if (decFilenameOptionsBox) decFilenameOptionsBox.style.display = 'block';
             if (decForm) decForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
         }
 
-        // Re-render queue display with updated mode rules
         this.renderQueueDisplay();
     }
 
@@ -100,7 +99,8 @@ export class DecoderUI {
 
         for (const file of files) {
             try {
-                const buffer = await file.arrayBuffer();
+                const rawBuffer = await file.arrayBuffer();
+                const buffer = await VLMRSDecoder.detectAndNormalizeBuffer(rawBuffer);
                 const metaInfo = VLMRSDecoder.extractMetadata(buffer);
 
                 const queueItem = {
@@ -114,11 +114,10 @@ export class DecoderUI {
                     result: null
                 };
 
-                // Requirement 1: Transparent mode auto-preview/auto-decrypt in Just View mode
+                // Transparent mode auto-preview/auto-decrypt in Just View mode
                 if (metaInfo.headerInfo.mode === 1) { // Mode B Transparent
                     const isPassProtected = metaInfo.plainMetadata && metaInfo.plainMetadata.encryption && metaInfo.plainMetadata.encryption.passwordProtected;
                     if (!isPassProtected) {
-                        // Auto-decrypt deterministic transparent file immediately
                         try {
                             const result = await VLMRSDecoder.decryptFile(buffer, '', {});
                             queueItem.status = 'done';
@@ -193,10 +192,8 @@ export class DecoderUI {
             card.appendChild(headerRow);
 
             if (item.plainMetadata) {
-                // Transparent Mode
                 const previewSlot = document.createElement('div');
                 if (item.result) {
-                    // Fully decrypted deterministic transparent preview
                     PreviewRenderer.renderDecryptedPreview(
                         previewSlot,
                         item.result.decryptedBuffer,
@@ -206,12 +203,10 @@ export class DecoderUI {
                         item.headerInfo
                     );
                 } else {
-                    // Preview plain metadata without password
                     PreviewRenderer.renderTransparentPreview(previewSlot, item.plainMetadata, item.headerInfo);
                 }
                 card.appendChild(previewSlot);
             } else {
-                // Full Encryption Mode A
                 const fullInfo = document.createElement('p');
                 fullInfo.className = 'text-secondary text-sm mt-1';
                 fullInfo.innerText = "🔒 Full Encryption Mode. All metadata encrypted. Switch to 'Full Decrypt' mode and enter password to view details.";
@@ -232,7 +227,6 @@ export class DecoderUI {
         const passInput = document.getElementById('dec-pass');
         const password = passInput ? passInput.value : '';
 
-        // Custom Filename Mode check
         const filenameRadio = document.querySelector('input[name="dec-filename-mode"]:checked');
         const customFilenameInput = document.getElementById('dec-custom-filename');
         const isCustomMode = filenameRadio && filenameRadio.value === 'custom';

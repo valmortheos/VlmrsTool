@@ -49,7 +49,7 @@
                     <ul class="mode-card-list">
                         <li>• Maximum security</li>
                         <li>• All metadata hidden</li>
-                        <li>• Binary .vlmrs output</li>
+                        <li>• Binary / Base64 text output</li>
                         <li>• Password required</li>
                     </ul>
                 </div>
@@ -75,6 +75,21 @@
             <div id="enc-files-list" class="files-list"></div>
 
             <div id="enc-form" style="display: none;">
+                <!-- Output Format Selector (Requirement 1) -->
+                <div class="filename-options-box mb-3">
+                    <div class="filename-options-title">Output Format</div>
+                    <div class="filename-options-radios">
+                        <label>
+                            <input type="radio" name="enc-output-format" value="binary" checked>
+                            Binary (.vlmrs) - Default
+                        </label>
+                        <label>
+                            <input type="radio" name="enc-output-format" value="base64">
+                            Base64 Text (.txt) - Text Editor Friendly
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Filename Customization Option -->
                 <div class="filename-options-box">
                     <div class="filename-options-title">Output Filename Option</div>
@@ -144,9 +159,9 @@
 
             <div class="drop-zone" id="dec-dropzone">
                 <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                <p>Drag & Drop .vlmrs files here<br>or <span class="browse-text">Browse Files</span></p>
+                <p>Drag & Drop .vlmrs or .txt files here<br>or <span class="browse-text">Browse Files</span></p>
             </div>
-            <input type="file" id="dec-file" multiple accept=".vlmrs" class="hidden">
+            <input type="file" id="dec-file" multiple accept=".vlmrs,.txt" class="hidden">
 
             <div id="dec-files-list" class="mb-3"></div>
 

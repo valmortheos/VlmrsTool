@@ -91,17 +91,15 @@ export class EncoderUI {
     }
 
     handleFileSelect(files) {
-        // Large file warning check (>200MB)
         const hasLargeFile = files.some(f => f.size > 200 * 1024 * 1024);
         if (hasLargeFile) {
             UIUtils.showToast("Files larger than 200MB may cause browser memory lag.", "warning", 5000);
         }
 
-        // Push new files to Queue state
         files.forEach(file => {
             this.fileQueue.push({
                 file,
-                status: 'pending', // pending, processing, done, error
+                status: 'pending',
                 progress: 0,
                 error: null,
                 result: null
@@ -182,6 +180,10 @@ export class EncoderUI {
             }
         }
 
+        // Output format selection: 'binary' or 'base64'
+        const outputFormatRadio = document.querySelector('input[name="enc-output-format"]:checked');
+        const outputFormat = outputFormatRadio ? outputFormatRadio.value : 'binary';
+
         // Custom Filename Mode check
         const filenameRadio = document.querySelector('input[name="enc-filename-mode"]:checked');
         const customFilenameInput = document.getElementById('enc-custom-filename');
@@ -195,7 +197,7 @@ export class EncoderUI {
 
         for (let i = 0; i < this.fileQueue.length; i++) {
             const queueItem = this.fileQueue[i];
-            if (queueItem.status === 'done') continue; // skip already processed
+            if (queueItem.status === 'done') continue;
 
             queueItem.status = 'processing';
             queueItem.progress = 0;
@@ -204,6 +206,7 @@ export class EncoderUI {
             try {
                 const result = await VLMRSEncoder.encodeFile(queueItem.file, {
                     mode: this.selectedMode,
+                    outputFormat: outputFormat,
                     password: password,
                     customBaseName: customBaseName,
                     index: i,
@@ -253,11 +256,12 @@ export class EncoderUI {
         card.className = 'card mb-3';
 
         const modeBadge = result.mode === 'full' ? '<span class="badge badge-danger">FULL MODE</span>' : '<span class="badge badge-success">TRANSPARENT MODE</span>';
+        const formatBadge = result.outputFormat === 'base64' ? '<span class="badge badge-info">BASE64 TEXT</span>' : '<span class="badge badge-secondary">BINARY</span>';
 
         card.innerHTML = `
             <div class="result-card-header">
                 <div>
-                    <strong>📁 <span class="card-display-filename">${result.outputFilename}</span></strong> ${modeBadge}
+                    <strong>📁 <span class="card-display-filename">${result.outputFilename}</span></strong> ${modeBadge} ${formatBadge}
                     <div class="text-secondary text-sm">Original: ${result.originalName}</div>
                 </div>
             </div>
@@ -268,23 +272,25 @@ export class EncoderUI {
                 </div>
             </div>
             <div class="result-card-actions">
-                <button class="btn btn-primary btn-download-single">Download .vlmrs</button>
+                <button class="btn btn-primary btn-download-single">Download Output File</button>
             </div>
         `;
 
         const renameInput = card.querySelector('.input-rename-card');
         const displayFilename = card.querySelector('.card-display-filename');
+        const targetExt = result.outputFormat === 'base64' ? '.txt' : '.vlmrs';
+
         renameInput.addEventListener('input', (e) => {
             let val = e.target.value.trim();
-            if (!val.endsWith('.vlmrs')) {
-                val += '.vlmrs';
+            if (!val.endsWith(targetExt)) {
+                val += targetExt;
             }
             result.outputFilename = val;
             displayFilename.innerText = val;
         });
 
         card.querySelector('.btn-download-single').addEventListener('click', () => {
-            const blob = new Blob([result.encodedBuffer], { type: 'application/octet-stream' });
+            const blob = new Blob([result.encodedBuffer], { type: result.mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
