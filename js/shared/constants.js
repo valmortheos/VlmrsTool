@@ -1,0 +1,39 @@
+/**
+ * Global Constants and Configuration
+ */
+
+export const VLMRS_CONSTANTS = {
+    MAGIC_BYTES: new Uint8Array([86, 76, 77, 82]), // "VLMR"
+    MAGIC_STRING: "VLMR",
+
+    VERSION_1: 0x01,
+    VERSION_2: 0x02,
+
+    MODE_FULL: 0x00,
+    MODE_TRANSPARENT: 0x01,
+
+    HEADER_V1_SIZE: 15,
+    HEADER_V2_SIZE: 24,
+
+    SALT_LENGTH: 16,
+    IV_LENGTH: 12,
+
+    ITERATIONS_FULL: 100000,
+    ITERATIONS_TRANSPARENT: 50000,
+
+    DETERMINISTIC_KEY_IDENTIFIER: "VLMRS_DETERMINISTIC_KEY_V1",
+
+    MAX_FILE_SIZE_WARNING: 200 * 1024 * 1024, // 200 MB
+
+    PREVIEW: {
+        MAX_IMAGE_DIMENSION: 320,
+        MAX_THUMBNAIL_BYTES: 50 * 1024, // 50 KB
+        MAX_TEXT_SNIPPET_CHARS: 500
+    }
+};
+
+export const DB_CONFIG = {
+    NAME: "vlmrs-history",
+    VERSION: 1,
+    STORE_NAME: "history"
+};

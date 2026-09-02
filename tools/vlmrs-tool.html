@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLMRS Encoder & Decoder v2 - Secure File Encryption</title>
+    <link rel="stylesheet" href="../css/shared/variables.css">
+    <link rel="stylesheet" href="../css/shared/base.css">
+    <link rel="stylesheet" href="../css/shared/components.css">
+    <link rel="stylesheet" href="../css/shared/utilities.css">
+    <link rel="stylesheet" href="../css/tools/vlmrs-tool.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
+                <span id="theme-toggle-icon"></span>
+            </button>
+            <div style="text-align: left;">
+                <a href="../index.html" class="back-link">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+                    </svg>
+                    Back to Tools Gateway
+                </a>
+            </div>
+            <h1>
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+                VLMRS Tool v2.0
+            </h1>
+            <p>AES-256-GCM Secure Client-Side Encoder & Decoder</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-encoder">Encoder</button>
+            <button class="tab-btn" id="tab-decoder">Decoder</button>
+            <button class="tab-btn" id="tab-history">History</button>
+        </div>
+
+        <!-- ENCODER VIEW -->
+        <section id="view-encoder" class="view-section active card">
+            <h2 class="mb-3">Mode Selection</h2>
+            <div class="mode-selection-grid">
+                <div class="mode-card mode-full selected" id="mode-card-full">
+                    <div class="mode-card-header">
+                        🔒 Full Encryption
+                    </div>
+                    <ul class="mode-card-list">
+                        <li>• Maximum security</li>
+                        <li>• All metadata hidden</li>
+                        <li>• Binary .vlmrs output</li>
+                        <li>• Password required</li>
+                    </ul>
+                </div>
+                <div class="mode-card mode-transparent" id="mode-card-transparent">
+                    <div class="mode-card-header">
+                        👁️ Transparent Mode
+                    </div>
+                    <ul class="mode-card-list">
+                        <li>• Preview in app without pass</li>
+                        <li>• Filename & size visible</li>
+                        <li>• Content encrypted</li>
+                        <li>• Password optional</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="drop-zone" id="enc-dropzone">
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                <p>Drag & Drop multiple files here<br>or <span class="browse-text">Browse Files</span></p>
+            </div>
+            <input type="file" id="enc-file" multiple class="hidden">
+
+            <div id="enc-files-list" class="files-list"></div>
+
+            <div id="enc-form" style="display: none;">
+                <div class="form-group">
+                    <label for="enc-pass">Encryption Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="enc-pass" class="input-control" placeholder="Enter password">
+                        <button type="button" id="btn-toggle-enc-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;">Show</button>
+                    </div>
+                    <small id="enc-pass-help" class="text-secondary mt-1 display-block">Password required to encrypt all file metadata and content.</small>
+                </div>
+
+                <div class="form-group" id="enc-pass-confirm-group">
+                    <label for="enc-pass-confirm">Confirm Password</label>
+                    <input type="password" id="enc-pass-confirm" class="input-control" placeholder="Confirm password">
+                </div>
+
+                <div class="progress-container" id="enc-progress-container">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="enc-progress-bar"></div>
+                    </div>
+                    <div class="progress-text" id="enc-progress-text">0%</div>
+                </div>
+
+                <button type="button" id="btn-start-encode" class="btn btn-primary mt-3" style="width: 100%;">
+                    Encode All Files
+                </button>
+            </div>
+
+            <div id="enc-results-container" class="mt-4" style="display: none;">
+                <div class="flex justify-between items-center mb-3">
+                    <h3>Encoded Files</h3>
+                    <button id="btn-enc-download-zip" class="btn btn-success btn-sm">Download ZIP</button>
+                </div>
+                <div id="enc-results-list"></div>
+            </div>
+        </section>
+
+        <!-- DECODER VIEW -->
+        <section id="view-decoder" class="view-section card">
+            <div class="drop-zone" id="dec-dropzone">
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                <p>Drag & Drop .vlmrs files here<br>or <span class="browse-text">Browse Files</span></p>
+            </div>
+            <input type="file" id="dec-file" multiple accept=".vlmrs" class="hidden">
+
+            <div id="dec-files-list" class="mb-3"></div>
+
+            <div id="dec-form" style="display: none;">
+                <div class="form-group">
+                    <label for="dec-pass">Decryption Password (if required)</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="dec-pass" class="input-control" placeholder="Enter password to decrypt content">
+                        <button type="button" id="btn-toggle-dec-pass" class="btn btn-secondary btn-sm" style="margin-left: 0.5rem;">Show</button>
+                    </div>
+                </div>
+
+                <div class="progress-container" id="dec-progress-container">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="dec-progress-bar"></div>
+                    </div>
+                    <div class="progress-text" id="dec-progress-text">0%</div>
+                </div>
+
+                <button type="button" id="btn-start-decode" class="btn btn-success mt-3" style="width: 100%;">
+                    Decode Content & Preview
+                </button>
+            </div>
+
+            <div id="dec-results-container" class="mt-4" style="display: none;">
+                <h3 class="mb-3">Decrypted Output</h3>
+                <div id="dec-results-list"></div>
+            </div>
+        </section>
+
+        <!-- HISTORY VIEW -->
+        <section id="view-history" class="view-section card">
+            <div class="flex justify-between items-center mb-3">
+                <h2>Operation History</h2>
+                <button id="btn-clear-history" class="btn btn-danger btn-sm">Clear History</button>
+            </div>
+            <div id="history-list"></div>
+        </section>
+
+        <footer>
+            <p>VLMRS Tool Suite v2.0 — Encrypted Client-Side Storage</p>
+        </footer>
+    </div>
+
+    <script type="module" src="../js/tools/vlmrs-tool/main.js"></script>
+</body>
+</html>
