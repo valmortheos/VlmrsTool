@@ -78,7 +78,7 @@ export class VLMRSDecoder {
                     derivedKey = await CryptoUtils.deriveKeyPBKDF2(password, salt, headerInfo.iterations);
                 } else {
                     // Deterministic key from salt
-                    const detSalt = plainMeta.encryption.keyDerivation.salt
+                    const detSalt = (plainMeta.encryption && plainMeta.encryption.keyDerivation && plainMeta.encryption.keyDerivation.salt)
                         ? CryptoUtils.base64ToBuffer(plainMeta.encryption.keyDerivation.salt)
                         : salt;
                     derivedKey = await CryptoUtils.deriveDeterministicKey(
@@ -170,40 +170,40 @@ export class VLMRSDecoder {
 
         if (progressCallback) progressCallback(95, "Verifying checksum...");
 
-        // Determine original filename & type
-        let originalFilename = "decrypted_file";
-        let mimeType = "application/octet-stream";
+        // Determine original filename & type from metadata
+        const activeMeta = decryptedMeta || VLMRSDecoder.extractMetadata(buffer).plainMetadata || {};
 
-        if (decryptedMeta) {
-            originalFilename = decryptedMeta.filename || originalFilename;
-            mimeType = decryptedMeta.type || mimeType;
+        let origBase = activeMeta.filename || "decrypted_file";
+        let origExt = activeMeta.extension || "";
+        let mimeType = activeMeta.mimeType || activeMeta.type || "application/octet-stream";
 
-            if (decryptedMeta.hash) {
-                const calculatedHash = await CryptoUtils.calculateSHA256Hex(decryptedFileBuffer);
-                if (calculatedHash !== decryptedMeta.hash) {
-                    console.warn("SHA-256 hash mismatch! File might be corrupted.");
-                }
-            }
-        } else if (headerInfo.plainMetaLength > 0) {
-            const plainMetaBytes = new Uint8Array(buffer, plainMetaOffset, plainMetaLength);
-            const plainMeta = JSON.parse(new TextDecoder().decode(plainMetaBytes));
-            originalFilename = plainMeta.filename || originalFilename;
-            mimeType = plainMeta.mimeType || mimeType;
+        // Fallback if extension is embedded in origBase
+        if (!origExt && origBase.includes('.')) {
+            const parsed = UIUtils.getBaseAndExt(origBase);
+            origBase = parsed.base;
+            origExt = parsed.ext;
         }
 
-        // Get extension from original filename
-        const { ext } = UIUtils.getBaseAndExt(originalFilename);
-        const outputFilename = UIUtils.computeOutputFilename(originalFilename, customBaseName, index, totalFiles, ext);
+        const fullOriginalName = `${origBase}${origExt}`;
+        const outputFilename = UIUtils.computeOutputFilename(fullOriginalName, customBaseName, index, totalFiles, origExt);
+
+        if (activeMeta.hash) {
+            const calculatedHash = await CryptoUtils.calculateSHA256Hex(decryptedFileBuffer);
+            if (calculatedHash !== activeMeta.hash) {
+                console.warn("SHA-256 hash mismatch! File might be corrupted.");
+            }
+        }
 
         if (progressCallback) progressCallback(100, "Decryption Complete!");
 
         return {
             decryptedBuffer: decryptedFileBuffer,
             filename: outputFilename,
-            originalFilename: originalFilename,
+            originalFilename: fullOriginalName,
             mimeType,
             size: decryptedFileBuffer.byteLength,
-            metadata: decryptedMeta || VLMRSDecoder.extractMetadata(buffer).plainMetadata
+            metadata: activeMeta,
+            headerInfo
         };
     }
 }

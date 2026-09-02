@@ -128,6 +128,20 @@
 
         <!-- DECODER VIEW -->
         <section id="view-decoder" class="view-section card">
+            <h2 class="mb-3">Decoder Mode</h2>
+            <div class="filename-options-box mb-3">
+                <div class="filename-options-radios">
+                    <label>
+                        <input type="radio" name="decoder-action-mode" value="just-view" checked>
+                        👁️ Just View (Auto-Preview)
+                    </label>
+                    <label>
+                        <input type="radio" name="decoder-action-mode" value="full-decrypt">
+                        🔓 Full Decrypt (Download Content)
+                    </label>
+                </div>
+            </div>
+
             <div class="drop-zone" id="dec-dropzone">
                 <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 <p>Drag & Drop .vlmrs files here<br>or <span class="browse-text">Browse Files</span></p>
@@ -138,7 +152,7 @@
 
             <div id="dec-form" style="display: none;">
                 <!-- Filename Customization Option -->
-                <div class="filename-options-box">
+                <div class="filename-options-box" id="dec-filename-options-box">
                     <div class="filename-options-title">Output Filename Option</div>
                     <div class="filename-options-radios">
                         <label>
@@ -153,7 +167,7 @@
                     <input type="text" id="dec-custom-filename" class="input-control" placeholder="Enter custom base name (without extension)" disabled>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" id="dec-pass-group">
                     <label for="dec-pass">Decryption Password (if required)</label>
                     <div class="input-wrapper">
                         <input type="password" id="dec-pass" class="input-control" placeholder="Enter password to decrypt content">

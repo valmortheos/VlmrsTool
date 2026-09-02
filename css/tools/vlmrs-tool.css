@@ -299,6 +299,42 @@
     margin-bottom: 1rem;
 }
 
+/* Enhanced Metadata Table Styling */
+.metadata-details-box {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--btn-radius);
+    padding: 0.75rem 1rem;
+}
+
+.metadata-summary-title {
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--primary-color);
+}
+
+.metadata-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.metadata-table td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: top;
+}
+
+.metadata-table td:first-child {
+    width: 40%;
+    color: var(--text-secondary);
+}
+
+.hash-text {
+    word-break: break-all;
+    font-size: 0.75rem;
+}
+
 /* Card Header & Button Positioning Fixes */
 .result-card-header {
     display: flex;
@@ -389,5 +425,9 @@
 
     .history-timestamp {
         align-self: flex-start;
+    }
+
+    .metadata-table td:first-child {
+        width: 50%;
     }
 }

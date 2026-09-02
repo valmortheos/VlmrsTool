@@ -8,6 +8,7 @@ export class DecoderUI {
     constructor() {
         this.fileQueue = [];
         this.decodedResults = [];
+        this.actionMode = 'just-view'; // 'just-view' or 'full-decrypt'
         this.init();
     }
 
@@ -42,6 +43,15 @@ export class DecoderUI {
             });
         }
 
+        // Action Mode Radios: Just View vs Full Decrypt
+        const actionRadios = document.querySelectorAll('input[name="decoder-action-mode"]');
+        actionRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                this.actionMode = e.target.value;
+                this.updateActionModeUI();
+            });
+        });
+
         // Filename mode radio toggles
         const filenameRadios = document.querySelectorAll('input[name="dec-filename-mode"]');
         const customFilenameInput = document.getElementById('dec-custom-filename');
@@ -63,6 +73,25 @@ export class DecoderUI {
         }
     }
 
+    updateActionModeUI() {
+        const decForm = document.getElementById('dec-form');
+        const decPassGroup = document.getElementById('dec-pass-group');
+        const decFilenameOptionsBox = document.getElementById('dec-filename-options-box');
+
+        if (this.actionMode === 'just-view') {
+            if (decPassGroup) decPassGroup.style.display = 'none';
+            if (decFilenameOptionsBox) decFilenameOptionsBox.style.display = 'none';
+            if (decForm) decForm.style.display = 'none'; // Auto-preview works without form submit
+        } else {
+            if (decPassGroup) decPassGroup.style.display = 'block';
+            if (decFilenameOptionsBox) decFilenameOptionsBox.style.display = 'block';
+            if (decForm) decForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
+        }
+
+        // Re-render queue display with updated mode rules
+        this.renderQueueDisplay();
+    }
+
     async handleFileSelect(files) {
         const hasLargeFile = files.some(f => f.size > 200 * 1024 * 1024);
         if (hasLargeFile) {
@@ -73,16 +102,34 @@ export class DecoderUI {
             try {
                 const buffer = await file.arrayBuffer();
                 const metaInfo = VLMRSDecoder.extractMetadata(buffer);
-                this.fileQueue.push({
+
+                const queueItem = {
                     file,
                     buffer,
                     headerInfo: metaInfo.headerInfo,
                     plainMetadata: metaInfo.plainMetadata,
-                    status: 'pending', // pending, processing, done, error
+                    status: 'pending',
                     progress: 0,
                     error: null,
                     result: null
-                });
+                };
+
+                // Requirement 1: Transparent mode auto-preview/auto-decrypt in Just View mode
+                if (metaInfo.headerInfo.mode === 1) { // Mode B Transparent
+                    const isPassProtected = metaInfo.plainMetadata && metaInfo.plainMetadata.encryption && metaInfo.plainMetadata.encryption.passwordProtected;
+                    if (!isPassProtected) {
+                        // Auto-decrypt deterministic transparent file immediately
+                        try {
+                            const result = await VLMRSDecoder.decryptFile(buffer, '', {});
+                            queueItem.status = 'done';
+                            queueItem.result = result;
+                        } catch (e) {
+                            console.warn("Auto-decrypt transparent file failed:", e);
+                        }
+                    }
+                }
+
+                this.fileQueue.push(queueItem);
             } catch (e) {
                 console.error("Error loading file for decoding:", e);
                 UIUtils.showToast(`Invalid VLMRS file: ${file.name}`, "danger");
@@ -90,7 +137,9 @@ export class DecoderUI {
         }
 
         const decForm = document.getElementById('dec-form');
-        if (decForm) decForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
+        if (decForm) {
+            decForm.style.display = (this.actionMode === 'full-decrypt' && this.fileQueue.length > 0) ? 'block' : 'none';
+        }
 
         this.renderQueueDisplay();
     }
@@ -127,7 +176,7 @@ export class DecoderUI {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="badge ${badgeClass}">${badgeText}</span>
-                    ${item.status === 'pending' ? `<button class="btn btn-secondary btn-sm btn-remove-dec" data-index="${index}">Remove</button>` : ''}
+                    <button class="btn btn-secondary btn-sm btn-remove-dec" data-index="${index}">Remove</button>
                 </div>
             `;
 
@@ -137,20 +186,35 @@ export class DecoderUI {
                     this.fileQueue.splice(index, 1);
                     this.renderQueueDisplay();
                     const decForm = document.getElementById('dec-form');
-                    if (decForm) decForm.style.display = this.fileQueue.length > 0 ? 'block' : 'none';
+                    if (decForm) decForm.style.display = (this.actionMode === 'full-decrypt' && this.fileQueue.length > 0) ? 'block' : 'none';
                 });
             }
 
             card.appendChild(headerRow);
 
             if (item.plainMetadata) {
+                // Transparent Mode
                 const previewSlot = document.createElement('div');
-                PreviewRenderer.renderTransparentPreview(previewSlot, item.plainMetadata);
+                if (item.result) {
+                    // Fully decrypted deterministic transparent preview
+                    PreviewRenderer.renderDecryptedPreview(
+                        previewSlot,
+                        item.result.decryptedBuffer,
+                        item.result.filename,
+                        item.result.mimeType,
+                        item.result.metadata,
+                        item.headerInfo
+                    );
+                } else {
+                    // Preview plain metadata without password
+                    PreviewRenderer.renderTransparentPreview(previewSlot, item.plainMetadata, item.headerInfo);
+                }
                 card.appendChild(previewSlot);
             } else {
+                // Full Encryption Mode A
                 const fullInfo = document.createElement('p');
                 fullInfo.className = 'text-secondary text-sm mt-1';
-                fullInfo.innerText = "🔒 Metadata encrypted. Password required to decrypt content.";
+                fullInfo.innerText = "🔒 Full Encryption Mode. All metadata encrypted. Switch to 'Full Decrypt' mode and enter password to view details.";
                 card.appendChild(fullInfo);
             }
 
@@ -258,7 +322,7 @@ export class DecoderUI {
         `;
 
         const previewSlot = card.querySelector('.decrypted-preview-slot');
-        PreviewRenderer.renderDecryptedPreview(previewSlot, result.decryptedBuffer, result.filename, result.mimeType);
+        PreviewRenderer.renderDecryptedPreview(previewSlot, result.decryptedBuffer, result.filename, result.mimeType, result.metadata, result.headerInfo);
 
         const renameInput = card.querySelector('.input-rename-card');
         const displayFilename = card.querySelector('.card-display-filename');

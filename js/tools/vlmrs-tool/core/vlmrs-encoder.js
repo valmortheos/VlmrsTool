@@ -22,7 +22,8 @@ export class VLMRSEncoder {
         if (progressCallback) progressCallback(25, "Calculating checksums & keys...");
         const fileHashHex = await CryptoUtils.calculateSHA256Hex(fileBuffer);
 
-        // Compute output filename: original name without original extension + .vlmrs
+        // Strip original extension before adding .vlmrs
+        const { base: originalBase, ext: originalExt } = UIUtils.getBaseAndExt(file.name);
         const outputFilename = UIUtils.computeOutputFilename(file.name, customBaseName, index, totalFiles, '.vlmrs');
 
         // Generate Random IV
@@ -57,11 +58,12 @@ export class VLMRSEncoder {
             const previewData = await MetadataManager.generatePreviewMetadata(file);
 
             plainMetadataObj = {
-                filename: file.name,
-                extension: '.' + (file.name.split('.').pop() || ''),
+                filename: originalBase,
+                extension: originalExt,
                 mimeType: file.type || 'application/octet-stream',
                 size: file.size,
                 timestamp: file.lastModified || Date.now(),
+                hash: fileHashHex,
                 mode: 'transparent',
                 vlmrsVersion: 2,
                 encryption: {
@@ -80,16 +82,27 @@ export class VLMRSEncoder {
             plainMetaBytes = new TextEncoder().encode(jsonStr);
         }
 
-        // Encrypt Metadata (Mode A only)
+        // Encrypt Metadata (Mode A only - ZERO plain metadata)
         let encMetaCiphertext = new Uint8Array(0);
         if (!isTransparent) {
             if (progressCallback) progressCallback(55, "Encrypting file metadata...");
             const metadataObj = {
-                filename: file.name,
+                filename: originalBase,
+                extension: originalExt,
+                mimeType: file.type || 'application/octet-stream',
                 size: file.size,
-                type: file.type || 'application/octet-stream',
-                lastModified: file.lastModified || Date.now(),
-                hash: fileHashHex
+                timestamp: file.lastModified || Date.now(),
+                hash: fileHashHex,
+                mode: 'full',
+                vlmrsVersion: 2,
+                encryption: {
+                    method: 'AES-256-GCM',
+                    passwordProtected: true,
+                    keyDerivation: {
+                        method: 'pbkdf2',
+                        iterations: iterations
+                    }
+                }
             };
             const metaJsonBytes = new TextEncoder().encode(JSON.stringify(metadataObj));
 
@@ -158,6 +171,7 @@ export class VLMRSEncoder {
             encodedBuffer: resultBuffer.buffer,
             outputFilename: outputFilename,
             originalName: file.name,
+            mimeType: "application/x-vlmrs",
             mode: mode,
             plainMetadata: plainMetadataObj
         };
