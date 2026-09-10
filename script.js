@@ -113,9 +113,10 @@ const saveHistoryEntry = async (operation, files) => {
             operation: operation,
             timestamp: Date.now(),
             files: files.map(file => ({
-                name: file.name || file.filename || file.originalName,
+                // Do not store original filenames, MIME types, or sensitive plaintext metadata in IndexedDB history
+                name: operation === 'encode' ? (file.encodedName || 'encrypted.vlmrs') : 'vlmrs_file.vlmrs',
                 size: file.size,
-                type: file.type || 'N/A',
+                type: 'application/octet-stream',
                 metadata: file.metadata ? {
                     vlmrsVersion: file.metadata.vlmrsVersion,
                     encryption: file.metadata.encryption,
@@ -920,11 +921,13 @@ const handleDecFileSelect = async (files) => {
         
         try {
             const buffer = await file.arrayBuffer();
+            // Header validation & offset overflow checks
             if (buffer.byteLength < 15) continue;
             
             const headerView = new DataView(buffer);
             const header8 = new Uint8Array(buffer);
             
+            // Magic check: "VLMR"
             if (header8[0] !== 86 || header8[1] !== 76 || header8[2] !== 77 || header8[3] !== 82) continue;
             
             const version = header8[4];
@@ -935,17 +938,24 @@ const handleDecFileSelect = async (files) => {
             const encryptedMetaLen = headerView.getUint32(7, true);
             const iterations = headerView.getUint32(11, true);
             
+            // Validate header parameters to prevent buffer overflow/malformed header exploits
+            if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || encryptedMetaLen === 0 || encryptedMetaLen > 100 * 1024 * 1024) {
+                continue;
+            }
+
             const headerLen = 15;
             const ivTotalLen = version === 2 ? (ivLen * 2) : ivLen;
             const totalHeaderLen = headerLen + saltLen + ivTotalLen + encryptedMetaLen;
             
             if (buffer.byteLength < totalHeaderLen) continue;
-            if (encryptedMetaLen === 0) continue;
             
             currentDecodeBuffers.push(buffer);
             encryptedMetaLengths.push(encryptedMetaLen);
             parsedHeaderLens.push(headerLen);
             parsedMetadata.push(null);
+
+            // Attach parsed version to file item for accurate UI display
+            file.parsedVersion = version;
             validFiles.push(file);
         } catch (error) {
             console.error('Error parsing file:', file.name, error);
@@ -988,7 +998,8 @@ const displayDecoderFiles = (files) => {
         
         const fileMeta = document.createElement('div');
         fileMeta.className = 'file-meta';
-        fileMeta.textContent = `Encrypted with VLMRS v1 • Click "Decode" to decrypt`;
+        const fileVer = file.parsedVersion || 2;
+        fileMeta.textContent = `Encrypted with VLMRS v${fileVer} • Click "Decode" to decrypt`;
         
         fileInfo.appendChild(fileName);
         fileInfo.appendChild(fileMeta);
