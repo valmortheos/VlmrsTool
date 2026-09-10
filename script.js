@@ -269,6 +269,7 @@ let parsedHeaderLens = [];
 let encryptedMetaLengths = [];
 let encodedBlobUrls = [];
 let decryptedBlobs = [];
+let previewBlobUrls = [];
 let currentEncodeResults = [];
 let currentDecodeResults = [];
 
@@ -389,12 +390,17 @@ function generatePreview(fileOrBlob, container, filename) {
         return;
     }
     if (type === 'application/pdf' || ext === 'pdf') {
+        previewBlobUrls.push(url);
         const iframe = document.createElement('iframe');
         iframe.src = url;
         iframe.style.width = '100%';
         iframe.style.height = '250px';
         iframe.style.border = 'none';
-        iframe.onload = () => URL.revokeObjectURL(url);
+        iframe.onload = () => {
+            const idx = previewBlobUrls.indexOf(url);
+            if (idx !== -1) previewBlobUrls.splice(idx, 1);
+            URL.revokeObjectURL(url);
+        };
         container.appendChild(iframe);
         return;
     }
@@ -785,6 +791,8 @@ const updateProgress = (view, percentage, message) => {
 const resetEncoder = () => {
     encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
     encodedBlobUrls = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
     currentEncodeFiles = [];
     currentEncodeResults = [];
 
@@ -1232,13 +1240,13 @@ const displayDecryptedPreviews = (files) => {
         
         const toggleBtn = document.createElement('button');
         toggleBtn.className = 'file-item-toggle';
-        toggleBtn.textContent = 'Preview';
+        toggleBtn.textContent = 'Details';
         toggleBtn.onclick = (e) => {
             e.stopPropagation();
             const content = header.nextElementSibling;
             const isHidden = content.style.display === 'none';
             content.style.display = isHidden ? 'block' : 'none';
-            toggleBtn.textContent = isHidden ? 'Hide' : 'Preview';
+            toggleBtn.textContent = isHidden ? 'Hide' : 'Details';
         };
         
         header.appendChild(fileName);
@@ -1250,7 +1258,17 @@ const displayDecryptedPreviews = (files) => {
         
         const previewArea = document.createElement('div');
         previewArea.className = 'preview-area';
-        generatePreview(file.blob, previewArea, file.filename || file.name);
+
+        if (file.savedToDisk) {
+            const diskInfo = document.createElement('div');
+            diskInfo.style.padding = '0.75rem';
+            diskInfo.style.color = 'var(--accent-color)';
+            diskInfo.style.fontWeight = 'bold';
+            diskInfo.textContent = '✅ Saved directly to disk (No in-memory preview)';
+            previewArea.appendChild(diskInfo);
+        } else {
+            generatePreview(file.blob, previewArea, file.filename || file.name);
+        }
         
         content.appendChild(previewArea);
         
@@ -1323,8 +1341,10 @@ const displayDecryptedPreviews = (files) => {
 const resetDecoder = () => {
     decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
     decryptedBlobs = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
 
-    // Best-effort zeroization of buffers in application memory
+    // Best-effort clearing of buffers in application memory
     currentDecodeBuffers.forEach(buf => {
         try { new Uint8Array(buf).fill(0); } catch (e) {}
     });
@@ -1355,6 +1375,7 @@ window.addEventListener('beforeunload', () => {
     try {
         encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
         decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
+        previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
         currentDecodeBuffers.forEach(buf => {
             try { new Uint8Array(buf).fill(0); } catch (e) {}
         });
