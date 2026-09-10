@@ -1,9 +1,10 @@
 /**
- * VLMRS Binary Structure v1.0 (Secure)
- * Header: Magic "VLMR", version, salt len, iv len, encrypted meta len (LE), iterations (LE)
- * Payload: Salt + IV + Encrypted Metadata (AES-GCM) + File Ciphertext (AES-GCM)
+ * VLMRS Binary Structure v2.0 (Secure Multi-Nonce)
+ * Header (15 bytes): Magic "VLMR" (4B), Version: 2 (1B), Salt Len: 16 (1B), IV Len: 12 (1B), Encrypted Meta Len (4B, LE), Iterations (4B, LE)
+ * Payload: Salt (16B) + Meta IV (12B) + File IV (12B) + Encrypted Metadata (AES-GCM) + File Ciphertext (AES-GCM)
  * Header (dengan encrypted meta len = 0) digunakan sebagai AAD untuk enkripsi metadata
  * Header (dengan encrypted meta len aktual) digunakan sebagai AAD untuk enkripsi file
+ * Legacy Version 1 (single IV) supported for decoding backward compatibility.
  */
 
 // Utility functions
@@ -1080,6 +1081,7 @@ const startDecoding = async () => {
             const ivLen = header8[6];
             const iterations = headerView.getUint32(11, true);
             
+            const version = header8[4];
             const saltStart = headerLen;
             const saltEnd = saltStart + saltLen;
             const salt = new Uint8Array(buffer.slice(saltStart, saltEnd));
