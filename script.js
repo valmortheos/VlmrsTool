@@ -606,17 +606,29 @@ const startEncoding = async () => {
             const origName = lastDot !== -1 && lastDot !== 0 ? file.name.substring(0, lastDot) : file.name;
             const origExt = lastDot !== -1 && lastDot !== 0 ? file.name.substring(lastDot) : '';
             
-            const streamChunks = [];
             const streamGen = encodeV3Stream(file, pass1, iterations, (ratio, msg) => {
                 const fileProgress = ((i + ratio) / totalFiles) * 100;
                 updateProgress('enc', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
             });
 
-            for await (const chunkBytes of streamGen) {
-                streamChunks.push(chunkBytes);
-            }
+            const readableStream = new ReadableStream({
+                async pull(controller) {
+                    try {
+                        const { value, done } = await streamGen.next();
+                        if (done) {
+                            controller.close();
+                        } else {
+                            controller.enqueue(value);
+                        }
+                    } catch (e) {
+                        controller.error(e);
+                    }
+                }
+            });
 
-            const finalBlob = new Blob(streamChunks, { type: "application/octet-stream" });
+            const finalBlob = await new Response(readableStream, {
+                headers: { "Content-Type": "application/octet-stream" }
+            }).blob();
             const blobUrl = URL.createObjectURL(finalBlob);
             
             encodedBlobUrls.push(blobUrl);
@@ -921,20 +933,58 @@ const startDecoding = async () => {
             let metadata = null;
             let decryptedChunks = [];
 
+            let blob;
+
             if (version === 3) {
-                // Streaming decode V3
+                // Streaming decode V3 - O(1) RAM chunk processing
                 const streamGen = decodeV3Stream(file, pass, (ratio, msg) => {
                     const fileProgress = ((i + ratio) / totalFiles) * 100;
                     updateProgress('dec', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
                 });
 
-                for await (const item of streamGen) {
-                    if (item.type === 'metadata') {
-                        metadata = item.metadata;
-                    } else if (item.type === 'chunk') {
-                        decryptedChunks.push(item.data);
-                    }
+                // Pull first item to extract metadata header
+                const firstResult = await streamGen.next();
+                if (!firstResult.done && firstResult.value.type === 'metadata') {
+                    metadata = firstResult.value.metadata;
                 }
+
+                // Determine restored MIME type
+                let restoredMimeType = 'application/octet-stream';
+                if (metadata && metadata.mimeType) {
+                    restoredMimeType = metadata.mimeType;
+                } else if (metadata && metadata.extension) {
+                    const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
+                    const mimeMap = {
+                        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                        'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
+                        'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
+                        'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
+                        'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
+                        'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
+                    };
+                    restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
+                }
+
+                const decryptedReadableStream = new ReadableStream({
+                    async pull(controller) {
+                        try {
+                            const { value, done } = await streamGen.next();
+                            if (done) {
+                                controller.close();
+                            } else {
+                                if (value && value.type === 'chunk') {
+                                    controller.enqueue(value.data);
+                                }
+                            }
+                        } catch (e) {
+                            controller.error(e);
+                        }
+                    }
+                });
+
+                blob = await new Response(decryptedReadableStream, {
+                    headers: { "Content-Type": restoredMimeType }
+                }).blob();
             } else {
                 if (file.size > 250 * 1024 * 1024) {
                     throw new Error(`File ${file.name} exceeds the 250 MB RAM safe limit for legacy V1/V2 full-buffer decoding.`);
@@ -1007,33 +1057,33 @@ const startDecoding = async () => {
                     }
                 }
 
-                decryptedChunks.push(new Uint8Array(decFileBuf));
+                let restoredMimeType = 'application/octet-stream';
+                if (metadata && metadata.mimeType) {
+                    restoredMimeType = metadata.mimeType;
+                } else if (metadata && metadata.extension) {
+                    const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
+                    const mimeMap = {
+                        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                        'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
+                        'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
+                        'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
+                        'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
+                        'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
+                    };
+                    restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
+                }
+
+                blob = new Blob([decFileBuf], { type: restoredMimeType });
             }
-            
+
             let defaultName;
             if (metadata && metadata.filename && metadata.extension) {
                 defaultName = metadata.filename + metadata.extension;
             } else {
                 defaultName = file.name.replace(/\.vlmrs$/i, '') || `decrypted_${i + 1}`;
             }
-            
-            let restoredMimeType = 'application/octet-stream';
-            if (metadata && metadata.mimeType) {
-                restoredMimeType = metadata.mimeType;
-            } else if (metadata && metadata.extension) {
-                const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
-                const mimeMap = {
-                    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
-                    'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
-                    'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
-                    'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
-                    'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
-                    'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
-                };
-                restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
-            }
 
-            const blob = new Blob(decryptedChunks, { type: restoredMimeType });
+            const restoredMimeType = blob.type || 'application/octet-stream';
             const blobUrl = URL.createObjectURL(blob);
             
             decryptedBlobs.push(blobUrl);
