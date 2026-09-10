@@ -298,13 +298,18 @@ const downloadBlob = (blob, filename) => {
 const downloadAllAsZip = async (view) => {
     const results = view === 'enc' ? currentEncodeResults : currentDecodeResults;
     if (!results || results.length === 0) return;
+
+    const downloadable = results.filter(f => !f.savedToDisk && f.blob);
+    if (downloadable.length === 0) {
+        return setStatus(view, 'info', 'All files were already saved directly to disk.');
+    }
     
     try {
         setStatus(view, 'info', 'Creating ZIP file...');
         
         const zip = new JSZip();
         
-        results.forEach((file, index) => {
+        downloadable.forEach((file, index) => {
             const filename = file.encodedName || file.filename || file.name || `file_${index + 1}`;
             zip.file(filename, file.blob);
         });
@@ -330,14 +335,19 @@ const downloadAllIndividually = async (view) => {
     const results = view === 'enc' ? currentEncodeResults : currentDecodeResults;
     if (!results || results.length === 0) return;
     
-    for (let i = 0; i < results.length; i++) {
-        const file = results[i];
+    const downloadable = results.filter(f => !f.savedToDisk && f.blob);
+    if (downloadable.length === 0) {
+        return setStatus(view, 'info', 'All files were already saved directly to disk.');
+    }
+
+    for (let i = 0; i < downloadable.length; i++) {
+        const file = downloadable[i];
         const filename = file.encodedName || file.filename || file.name || `file_${i + 1}`;
         downloadBlob(file.blob, filename);
         await sleep(500); // Delay between downloads
     }
     
-    setStatus(view, 'success', `${results.length} file(s) download started!`);
+    setStatus(view, 'success', `${downloadable.length} file(s) download started!`);
 };
 
 // Preview helper functions
@@ -978,9 +988,11 @@ const startDecoding = async () => {
             const version = header8[4];
             
             let metadata = null;
-            let decryptedChunks = [];
-
-            let blob;
+            let blob = null;
+            let usedDiskStream = false;
+            let writtenBytes = 0;
+            let restoredMimeType = 'application/octet-stream';
+            let defaultName = '';
 
             if (version === 3) {
                 // Streaming decode V3
@@ -995,10 +1007,8 @@ const startDecoding = async () => {
                     metadata = firstResult.value.metadata;
                 }
 
-                let defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '');
+                defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '');
 
-                // Determine restored MIME type and sanitize (strip ; charset=...)
-                let restoredMimeType = 'application/octet-stream';
                 if (metadata && metadata.mimeType) {
                     restoredMimeType = metadata.mimeType.split(';')[0].trim() || 'application/octet-stream';
                 } else if (metadata && metadata.extension) {
@@ -1014,9 +1024,7 @@ const startDecoding = async () => {
                     restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
                 }
 
-                let usedDiskStream = false;
                 let streamStarted = false;
-                let writtenBytes = 0;
 
                 // Direct File System Access API disk streaming if available
                 if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
@@ -1025,7 +1033,7 @@ const startDecoding = async () => {
                         const sanitizedMimeForPicker = restoredMimeType.includes('/') ? restoredMimeType : 'application/octet-stream';
                         handle = await window.showSaveFilePicker({
                             suggestedName: defaultName,
-                            types: [{ description: 'Decrypted File', accept: { [sanitizedMimeForPicker]: ['.' + (metadata.extension || 'bin').replace(/^\./, '')] } }]
+                            types: [{ description: 'Decrypted File', accept: { [sanitizedMimeForPicker]: ['.' + ((metadata && metadata.extension) ? metadata.extension : 'bin').replace(/^\./, '')] } }]
                         });
                         writable = await handle.createWritable();
                     } catch (pickerErr) {
@@ -1143,9 +1151,8 @@ const startDecoding = async () => {
                     }
                 }
 
-                let restoredMimeType = 'application/octet-stream';
                 if (metadata && metadata.mimeType) {
-                    restoredMimeType = metadata.mimeType;
+                    restoredMimeType = metadata.mimeType.split(';')[0].trim() || 'application/octet-stream';
                 } else if (metadata && metadata.extension) {
                     const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
                     const mimeMap = {
@@ -1160,19 +1167,17 @@ const startDecoding = async () => {
                 }
 
                 blob = new Blob([decFileBuf], { type: restoredMimeType });
+                writtenBytes = blob.size;
+                usedDiskStream = false;
             }
 
-            let defaultName;
-            if (metadata && metadata.filename && metadata.extension) {
-                defaultName = metadata.filename + metadata.extension;
-            } else {
-                defaultName = file.name.replace(/\.vlmrs$/i, '') || `decrypted_${i + 1}`;
+            if (!defaultName) {
+                defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '') || `decrypted_${i + 1}`;
             }
 
-            const restoredMimeType = blob.type || 'application/octet-stream';
-            const blobUrl = URL.createObjectURL(blob);
-            
-            decryptedBlobs.push(blobUrl);
+            const blobUrl = blob ? URL.createObjectURL(blob) : null;
+            if (blobUrl) decryptedBlobs.push(blobUrl);
+
             currentDecodeResults.push({
                 blob: blob,
                 url: blobUrl,
