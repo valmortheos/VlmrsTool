@@ -263,7 +263,6 @@ const clearHistory = async () => {
 // Global state
 let currentEncodeFiles = [];
 let currentDecodeFiles = [];
-let currentDecodeBuffers = [];
 let parsedMetadata = [];
 let parsedHeaderLens = [];
 let encryptedMetaLengths = [];
@@ -486,6 +485,8 @@ const encFileInput = document.getElementById('enc-file');
 const handleEncFileSelect = (files) => {
     if (!files || files.length === 0) return;
     
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
     currentEncodeFiles = Array.from(files);
     document.getElementById('enc-form').style.display = 'block';
     document.getElementById('enc-download-area').style.display = 'none';
@@ -819,7 +820,8 @@ const decFileInput = document.getElementById('dec-file');
 const handleDecFileSelect = async (files) => {
     if (!files || files.length === 0) return;
     
-    currentDecodeBuffers = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
     currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
@@ -1344,11 +1346,6 @@ const resetDecoder = () => {
     previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
     previewBlobUrls = [];
 
-    // Best-effort clearing of buffers in application memory
-    currentDecodeBuffers.forEach(buf => {
-        try { new Uint8Array(buf).fill(0); } catch (e) {}
-    });
-    currentDecodeBuffers = [];
     currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
@@ -1376,8 +1373,5 @@ window.addEventListener('beforeunload', () => {
         encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
         decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
         previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
-        currentDecodeBuffers.forEach(buf => {
-            try { new Uint8Array(buf).fill(0); } catch (e) {}
-        });
     } catch (e) {}
 });
