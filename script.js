@@ -115,7 +115,12 @@ const saveHistoryEntry = async (operation, files) => {
                 name: file.name || file.filename || file.originalName,
                 size: file.size,
                 type: file.type || 'N/A',
-                metadata: file.metadata || null
+                metadata: file.metadata ? {
+                    vlmrsVersion: file.metadata.vlmrsVersion,
+                    encryption: file.metadata.encryption,
+                    tool: file.metadata.tool,
+                    credit: file.metadata.credit
+                } : null
             }))
         };
         
@@ -550,8 +555,10 @@ encDropzone.addEventListener('drop', (e) => {
 encFileInput.addEventListener('change', (e) => handleEncFileSelect(e.target.files));
 
 const startEncoding = async () => {
-    const pass1 = document.getElementById('enc-pass').value;
-    const pass2 = document.getElementById('enc-pass-confirm').value;
+    const passInput = document.getElementById('enc-pass');
+    const passConfirmInput = document.getElementById('enc-pass-confirm');
+    const pass1 = passInput ? passInput.value : '';
+    const pass2 = passConfirmInput ? passConfirmInput.value : '';
     
     if (!pass1) return setStatus('enc', 'error', 'Password cannot be empty.');
     if (pass1 !== pass2) return setStatus('enc', 'error', 'Passwords do not match.');
@@ -630,12 +637,15 @@ const startEncoding = async () => {
                 fileHash: fileHash
             };
             
-            // Derive key
+            // Derive key with best-effort memory zeroization of password byte array
             const progressKeyStart = baseProgress + 25;
             updateProgress('enc', progressKeyStart, `Deriving key for ${file.name}...`);
             await sleep(50);
             
-            const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass1), "PBKDF2", false, ["deriveKey"]);
+            const passBytes = new TextEncoder().encode(pass1);
+            const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
+            passBytes.fill(0); // Best-effort zeroize password byte buffer
+
             const key = await crypto.subtle.deriveKey(
                 { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
                 keyMaterial,
@@ -673,6 +683,7 @@ const startEncoding = async () => {
                 key,
                 metaBytes
             );
+            metaBytes.fill(0); // Best-effort zeroize plaintext metadata byte buffer
             
             // Update header with actual encryptedMetaLen
             finalHeaderView.setUint32(7, encryptedMeta.byteLength, true);
@@ -714,6 +725,7 @@ const startEncoding = async () => {
                     key,
                     combinedBuf.buffer
                 );
+                combinedBuf.fill(0); // Best-effort zeroize combined plaintext buffer
             } else {
                 ciphertextBuf = await crypto.subtle.encrypt(
                     { name: "AES-GCM", iv: iv, additionalData: fileAAD },
@@ -722,6 +734,9 @@ const startEncoding = async () => {
                 );
             }
             
+            // Best-effort zeroization of plaintext input file buffer
+            try { new Uint8Array(fileBuf).fill(0); } catch(e) {}
+
             // Final assembly
             const progressFinalStart = baseProgress + 92;
             updateProgress('enc', progressFinalStart, `Finalizing ${file.name}...`);
@@ -772,7 +787,7 @@ const startEncoding = async () => {
         document.getElementById('enc-reset').style.display = 'block';
         
     } catch (error) {
-        console.error(error);
+        console.error('Encoding process error:', error.message);
         setStatus('enc', 'error', 'Encoding error: ' + error.message);
     } finally {
         btn.disabled = false;
@@ -838,9 +853,15 @@ const resetEncoder = () => {
     encodedBlobUrls = [];
     currentEncodeFiles = [];
     currentEncodeResults = [];
-    document.getElementById('enc-file').value = '';
-    document.getElementById('enc-pass').value = '';
-    document.getElementById('enc-pass-confirm').value = '';
+
+    const p1 = document.getElementById('enc-pass');
+    const p2 = document.getElementById('enc-pass-confirm');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+
+    const fileInput = document.getElementById('enc-file');
+    if (fileInput) fileInput.value = '';
+
     document.getElementById('enc-files-list').innerHTML = '';
     document.getElementById('enc-form').style.display = 'none';
     document.getElementById('enc-download-area').style.display = 'none';
@@ -991,7 +1012,8 @@ decDropzone.addEventListener('drop', (e) => {
 decFileInput.addEventListener('change', (e) => handleDecFileSelect(e.target.files));
 
 const startDecoding = async () => {
-    const pass = document.getElementById('dec-pass').value;
+    const passInput = document.getElementById('dec-pass');
+    const pass = passInput ? passInput.value : '';
     if (!pass) return setStatus('dec', 'error', 'Password cannot be empty.');
     if (!currentDecodeBuffers.length) return setStatus('dec', 'error', 'No valid files parsed.');
     
@@ -1041,12 +1063,15 @@ const startDecoding = async () => {
             const metadataAADView = new DataView(metadataAAD.buffer);
             metadataAADView.setUint32(7, 0, true);
             
-            // Derive key
+            // Derive key with best-effort memory zeroization of password byte array
             const progressKeyStart = baseProgress + 10;
             updateProgress('dec', progressKeyStart, `Deriving key for file ${i + 1}...`);
             await sleep(50);
             
-            const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+            const passBytes = new TextEncoder().encode(pass);
+            const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
+            passBytes.fill(0); // Best-effort zeroize password byte buffer
+
             const key = await crypto.subtle.deriveKey(
                 { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
                 keyMaterial,
@@ -1069,10 +1094,11 @@ const startDecoding = async () => {
                 );
                 
                 const metaString = new TextDecoder().decode(decryptedMetaBuf);
+                try { new Uint8Array(decryptedMetaBuf).fill(0); } catch(e){} // Zeroize metadata plaintext buffer
+
                 metadata = JSON.parse(metaString);
                 parsedMetadata[i] = metadata;
             } catch (error) {
-                console.error('Metadata decryption failed:', error);
                 throw new Error('Failed to decrypt metadata - incorrect password or corrupted file');
             }
             
@@ -1096,7 +1122,6 @@ const startDecoding = async () => {
                     ciphertext
                 );
             } catch (error) {
-                console.error('File decryption failed:', error);
                 throw new Error('Failed to decrypt file content - incorrect password or corrupted file');
             }
             
@@ -1174,7 +1199,6 @@ const startDecoding = async () => {
         document.getElementById('dec-reset').style.display = 'block';
         
     } catch (error) {
-        console.error(error);
         setStatus('dec', 'error', 'Decryption failed! ' + error.message);
     } finally {
         btn.disabled = false;
@@ -1289,13 +1313,23 @@ const displayDecryptedPreviews = (files) => {
 const resetDecoder = () => {
     decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
     decryptedBlobs = [];
+
+    // Best-effort zeroization of buffers in application memory
+    currentDecodeBuffers.forEach(buf => {
+        try { new Uint8Array(buf).fill(0); } catch (e) {}
+    });
     currentDecodeBuffers = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
     encryptedMetaLengths = [];
     currentDecodeResults = [];
-    document.getElementById('dec-file').value = '';
-    document.getElementById('dec-pass').value = '';
+
+    const p = document.getElementById('dec-pass');
+    if (p) p.value = '';
+
+    const f = document.getElementById('dec-file');
+    if (f) f.value = '';
+
     document.getElementById('dec-files-list').innerHTML = '';
     document.getElementById('dec-form').style.display = 'none';
     document.getElementById('dec-download-area').style.display = 'none';
@@ -1304,3 +1338,14 @@ const resetDecoder = () => {
     document.getElementById('dec-status').style.display = 'none';
     document.getElementById('dec-reset').style.display = 'none';
 };
+
+// Revoke resources on page unload as best-effort cleanup
+window.addEventListener('beforeunload', () => {
+    try {
+        encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
+        decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
+        currentDecodeBuffers.forEach(buf => {
+            try { new Uint8Array(buf).fill(0); } catch (e) {}
+        });
+    } catch (e) {}
+});
