@@ -205,9 +205,15 @@ const loadHistoryDisplay = async () => {
                         metadataDiv.style.width = '100%';
                         metadataDiv.style.fontSize = '0.8rem';
                         metadataDiv.style.color = 'var(--text-secondary)';
-                        metadataDiv.innerHTML = Object.entries(file.metadata)
-                            .map(([key, value]) => `<span style="margin-right:1rem;"><strong>${key}:</strong> ${value}</span>`)
-                            .join('');
+                        Object.entries(file.metadata).forEach(([key, value]) => {
+                            const span = document.createElement('span');
+                            span.style.marginRight = '1rem';
+                            const strong = document.createElement('strong');
+                            strong.textContent = key + ': ';
+                            span.appendChild(strong);
+                            span.appendChild(document.createTextNode(String(value)));
+                            metadataDiv.appendChild(span);
+                        });
                         fileItem.appendChild(metadataDiv);
                     }
                     
@@ -442,7 +448,12 @@ function updateMetadataDisplay(file, metadata) {
             if (detailsDiv) {
                 const checksumRow = document.createElement('div');
                 checksumRow.className = 'detail-row';
-                checksumRow.innerHTML = `<span>Checksum (simple)</span><span>${metadata['Checksum (simple)']}</span>`;
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = 'Checksum (simple)';
+                const valSpan = document.createElement('span');
+                valSpan.textContent = metadata['Checksum (simple)'];
+                checksumRow.appendChild(labelSpan);
+                checksumRow.appendChild(valSpan);
                 detailsDiv.appendChild(checksumRow);
             }
         }
@@ -512,7 +523,12 @@ const displayEncoderFiles = () => {
         Object.entries(metadata).forEach(([key, value]) => {
             const row = document.createElement('div');
             row.className = 'detail-row';
-            row.innerHTML = `<span>${key}</span><span>${value}</span>`;
+            const kSpan = document.createElement('span');
+            kSpan.textContent = key;
+            const vSpan = document.createElement('span');
+            vSpan.textContent = String(value);
+            row.appendChild(kSpan);
+            row.appendChild(vSpan);
             detailsDiv.appendChild(row);
         });
         
@@ -589,9 +605,6 @@ const startEncoding = async () => {
             const lastDot = file.name.lastIndexOf('.');
             const origName = lastDot !== -1 && lastDot !== 0 ? file.name.substring(0, lastDot) : file.name;
             const origExt = lastDot !== -1 && lastDot !== 0 ? file.name.substring(lastDot) : '';
-            
-            const salt = crypto.getRandomValues(new Uint8Array(16));
-            const iv = crypto.getRandomValues(new Uint8Array(12));
             
             // Read file first
             const progressReadStart = baseProgress + 5;
@@ -814,10 +827,18 @@ const displayDownloadButtons = (view, files) => {
         
         const originalNameDiv = document.createElement('div');
         originalNameDiv.className = 'original-name';
-        originalNameDiv.innerHTML = `
-            <span class="file-original-label">Original: ${file.originalName || file.filename}</span>
-            <span style="font-size:0.85rem; color:var(--text-secondary);">${formatBytes(file.size)}</span>
-        `;
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'file-original-label';
+        labelSpan.textContent = `Original: ${file.originalName || file.filename || file.name}`;
+
+        const sizeSpan = document.createElement('span');
+        sizeSpan.style.fontSize = '0.85rem';
+        sizeSpan.style.color = 'var(--text-secondary)';
+        sizeSpan.textContent = formatBytes(file.size);
+
+        originalNameDiv.appendChild(labelSpan);
+        originalNameDiv.appendChild(sizeSpan);
         
         const renameInput = document.createElement('input');
         renameInput.type = 'text';
@@ -998,7 +1019,12 @@ const displayDecoderFiles = (files) => {
         Object.entries(details).forEach(([key, value]) => {
             const row = document.createElement('div');
             row.className = 'detail-row';
-            row.innerHTML = `<span>${key}</span><span>${value}</span>`;
+            const kSpan = document.createElement('span');
+            kSpan.textContent = key;
+            const vSpan = document.createElement('span');
+            vSpan.textContent = String(value);
+            row.appendChild(kSpan);
+            row.appendChild(vSpan);
             detailsDiv.appendChild(row);
         });
         
@@ -1318,7 +1344,10 @@ const displayDecryptedPreviews = (files) => {
         Object.entries(detailItems).forEach(([key, value]) => {
             const item = document.createElement('div');
             item.className = 'meta-item';
-            item.innerHTML = `<strong>${key}:</strong> ${value}`;
+            const strong = document.createElement('strong');
+            strong.textContent = key + ': ';
+            item.appendChild(strong);
+            item.appendChild(document.createTextNode(String(value)));
             metaGrid.appendChild(item);
         });
         
