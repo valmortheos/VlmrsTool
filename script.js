@@ -1,9 +1,10 @@
 /**
- * VLMRS Binary Structure v1.0 (Secure)
- * Header: Magic "VLMR", version, salt len, iv len, encrypted meta len (LE), iterations (LE)
- * Payload: Salt + IV + Encrypted Metadata (AES-GCM) + File Ciphertext (AES-GCM)
+ * VLMRS Binary Structure v2.0 (Secure Multi-Nonce)
+ * Header (15 bytes): Magic "VLMR" (4B), Version: 2 (1B), Salt Len: 16 (1B), IV Len: 12 (1B), Encrypted Meta Len (4B, LE), Iterations (4B, LE)
+ * Payload: Salt (16B) + Meta IV (12B) + File IV (12B) + Encrypted Metadata (AES-GCM) + File Ciphertext (AES-GCM)
  * Header (dengan encrypted meta len = 0) digunakan sebagai AAD untuk enkripsi metadata
  * Header (dengan encrypted meta len aktual) digunakan sebagai AAD untuk enkripsi file
+ * Legacy Version 1 (single IV) supported for decoding backward compatibility.
  */
 
 // Utility functions
@@ -112,10 +113,16 @@ const saveHistoryEntry = async (operation, files) => {
             operation: operation,
             timestamp: Date.now(),
             files: files.map(file => ({
-                name: file.name || file.filename || file.originalName,
+                // Do not store original filenames, MIME types, or sensitive plaintext metadata in IndexedDB history
+                name: operation === 'encode' ? (file.encodedName || 'encrypted.vlmrs') : 'vlmrs_file.vlmrs',
                 size: file.size,
-                type: file.type || 'N/A',
-                metadata: file.metadata || null
+                type: 'application/octet-stream',
+                metadata: file.metadata ? {
+                    vlmrsVersion: file.metadata.vlmrsVersion,
+                    encryption: file.metadata.encryption,
+                    tool: file.metadata.tool,
+                    credit: file.metadata.credit
+                } : null
             }))
         };
         
@@ -200,9 +207,15 @@ const loadHistoryDisplay = async () => {
                         metadataDiv.style.width = '100%';
                         metadataDiv.style.fontSize = '0.8rem';
                         metadataDiv.style.color = 'var(--text-secondary)';
-                        metadataDiv.innerHTML = Object.entries(file.metadata)
-                            .map(([key, value]) => `<span style="margin-right:1rem;"><strong>${key}:</strong> ${value}</span>`)
-                            .join('');
+                        Object.entries(file.metadata).forEach(([key, value]) => {
+                            const span = document.createElement('span');
+                            span.style.marginRight = '1rem';
+                            const strong = document.createElement('strong');
+                            strong.textContent = key + ': ';
+                            span.appendChild(strong);
+                            span.appendChild(document.createTextNode(String(value)));
+                            metadataDiv.appendChild(span);
+                        });
                         fileItem.appendChild(metadataDiv);
                     }
                     
@@ -249,12 +262,13 @@ const clearHistory = async () => {
 
 // Global state
 let currentEncodeFiles = [];
-let currentDecodeBuffers = [];
+let currentDecodeFiles = [];
 let parsedMetadata = [];
 let parsedHeaderLens = [];
 let encryptedMetaLengths = [];
 let encodedBlobUrls = [];
 let decryptedBlobs = [];
+let previewBlobUrls = [];
 let currentEncodeResults = [];
 let currentDecodeResults = [];
 
@@ -284,13 +298,18 @@ const downloadBlob = (blob, filename) => {
 const downloadAllAsZip = async (view) => {
     const results = view === 'enc' ? currentEncodeResults : currentDecodeResults;
     if (!results || results.length === 0) return;
+
+    const downloadable = results.filter(f => !f.savedToDisk && f.blob);
+    if (downloadable.length === 0) {
+        return setStatus(view, 'info', 'All files were already saved directly to disk.');
+    }
     
     try {
         setStatus(view, 'info', 'Creating ZIP file...');
         
         const zip = new JSZip();
         
-        results.forEach((file, index) => {
+        downloadable.forEach((file, index) => {
             const filename = file.encodedName || file.filename || file.name || `file_${index + 1}`;
             zip.file(filename, file.blob);
         });
@@ -316,14 +335,19 @@ const downloadAllIndividually = async (view) => {
     const results = view === 'enc' ? currentEncodeResults : currentDecodeResults;
     if (!results || results.length === 0) return;
     
-    for (let i = 0; i < results.length; i++) {
-        const file = results[i];
+    const downloadable = results.filter(f => !f.savedToDisk && f.blob);
+    if (downloadable.length === 0) {
+        return setStatus(view, 'info', 'All files were already saved directly to disk.');
+    }
+
+    for (let i = 0; i < downloadable.length; i++) {
+        const file = downloadable[i];
         const filename = file.encodedName || file.filename || file.name || `file_${i + 1}`;
         downloadBlob(file.blob, filename);
         await sleep(500); // Delay between downloads
     }
     
-    setStatus(view, 'success', `${results.length} file(s) download started!`);
+    setStatus(view, 'success', `${downloadable.length} file(s) download started!`);
 };
 
 // Preview helper functions
@@ -365,12 +389,17 @@ function generatePreview(fileOrBlob, container, filename) {
         return;
     }
     if (type === 'application/pdf' || ext === 'pdf') {
+        previewBlobUrls.push(url);
         const iframe = document.createElement('iframe');
         iframe.src = url;
         iframe.style.width = '100%';
         iframe.style.height = '250px';
         iframe.style.border = 'none';
-        iframe.onload = () => URL.revokeObjectURL(url);
+        iframe.onload = () => {
+            const idx = previewBlobUrls.indexOf(url);
+            if (idx !== -1) previewBlobUrls.splice(idx, 1);
+            URL.revokeObjectURL(url);
+        };
         container.appendChild(iframe);
         return;
     }
@@ -437,7 +466,12 @@ function updateMetadataDisplay(file, metadata) {
             if (detailsDiv) {
                 const checksumRow = document.createElement('div');
                 checksumRow.className = 'detail-row';
-                checksumRow.innerHTML = `<span>Checksum (simple)</span><span>${metadata['Checksum (simple)']}</span>`;
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = 'Checksum (simple)';
+                const valSpan = document.createElement('span');
+                valSpan.textContent = metadata['Checksum (simple)'];
+                checksumRow.appendChild(labelSpan);
+                checksumRow.appendChild(valSpan);
                 detailsDiv.appendChild(checksumRow);
             }
         }
@@ -451,6 +485,8 @@ const encFileInput = document.getElementById('enc-file');
 const handleEncFileSelect = (files) => {
     if (!files || files.length === 0) return;
     
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
     currentEncodeFiles = Array.from(files);
     document.getElementById('enc-form').style.display = 'block';
     document.getElementById('enc-download-area').style.display = 'none';
@@ -507,7 +543,12 @@ const displayEncoderFiles = () => {
         Object.entries(metadata).forEach(([key, value]) => {
             const row = document.createElement('div');
             row.className = 'detail-row';
-            row.innerHTML = `<span>${key}</span><span>${value}</span>`;
+            const kSpan = document.createElement('span');
+            kSpan.textContent = key;
+            const vSpan = document.createElement('span');
+            vSpan.textContent = String(value);
+            row.appendChild(kSpan);
+            row.appendChild(vSpan);
             detailsDiv.appendChild(row);
         });
         
@@ -550,8 +591,10 @@ encDropzone.addEventListener('drop', (e) => {
 encFileInput.addEventListener('change', (e) => handleEncFileSelect(e.target.files));
 
 const startEncoding = async () => {
-    const pass1 = document.getElementById('enc-pass').value;
-    const pass2 = document.getElementById('enc-pass-confirm').value;
+    const passInput = document.getElementById('enc-pass');
+    const passConfirmInput = document.getElementById('enc-pass-confirm');
+    const pass1 = passInput ? passInput.value : '';
+    const pass2 = passConfirmInput ? passConfirmInput.value : '';
     
     if (!pass1) return setStatus('enc', 'error', 'Password cannot be empty.');
     if (pass1 !== pass2) return setStatus('enc', 'error', 'Passwords do not match.');
@@ -570,190 +613,86 @@ const startEncoding = async () => {
         const totalFiles = currentEncodeFiles.length;
         const iterations = 100000;
         
+        // Dynamically import streaming module
+        const { encodeV3Stream } = await import('./vlmrs-streaming.js');
+
         for (let i = 0; i < totalFiles; i++) {
             const file = currentEncodeFiles[i];
-            const fileSize = file.size;
-            const isLargeFile = fileSize > 100 * 1024 * 1024;
-            
-            const baseProgress = (i / totalFiles) * 100;
-            updateProgress('enc', baseProgress, `Preparing ${file.name}...`);
-            await sleep(50);
             
             const lastDot = file.name.lastIndexOf('.');
             const origName = lastDot !== -1 && lastDot !== 0 ? file.name.substring(0, lastDot) : file.name;
             const origExt = lastDot !== -1 && lastDot !== 0 ? file.name.substring(lastDot) : '';
             
-            const salt = crypto.getRandomValues(new Uint8Array(16));
-            const iv = crypto.getRandomValues(new Uint8Array(12));
-            
-            // Read file first
-            const progressReadStart = baseProgress + 5;
-            updateProgress('enc', progressReadStart, `Reading ${file.name}...`);
-            await sleep(50);
-            
-            let fileBuf;
-            if (isLargeFile) {
-                const reader = new FileReader();
-                const readPromise = new Promise((resolve, reject) => {
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.onerror = reject;
-                    reader.onprogress = (e) => {
-                        if (e.lengthComputable) {
-                            const readProgress = progressReadStart + ((e.loaded / e.total) * 15);
-                            updateProgress('enc', readProgress, `Reading ${file.name}... ${Math.round((e.loaded / e.total) * 100)}%`);
+            const streamGen = encodeV3Stream(file, pass1, iterations, (ratio, msg) => {
+                const fileProgress = ((i + ratio) / totalFiles) * 100;
+                updateProgress('enc', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
+            });
+
+            let finalBlob = null;
+            let usedDiskStream = false;
+            let streamStarted = false;
+            let writtenBytes = 0;
+
+            // Direct File System Access API disk streaming if available
+            if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                let handle, writable;
+                try {
+                    handle = await window.showSaveFilePicker({
+                        suggestedName: origName + '.vlmrs',
+                        types: [{ description: 'VLMRS Encrypted Container', accept: { 'application/octet-stream': ['.vlmrs'] } }]
+                    });
+                    writable = await handle.createWritable();
+                } catch (pickerErr) {
+                    if (pickerErr.name === 'AbortError') throw new Error("Encoding cancelled by user.");
+                    console.warn("File picker / createWritable failed before stream consumption. Falling back to Blob:", pickerErr.message);
+                }
+
+                if (writable) {
+                    try {
+                        for await (const chunkBytes of streamGen) {
+                            streamStarted = true;
+                            await writable.write(chunkBytes);
+                            writtenBytes += chunkBytes.byteLength;
                         }
-                    };
-                    reader.readAsArrayBuffer(file);
+                        await writable.close();
+                        usedDiskStream = true;
+                    } catch (writeErr) {
+                        try { await writable.abort(); } catch (e) {}
+                        throw new Error("Disk streaming write failed midway: " + writeErr.message);
+                    }
+                }
+            }
+
+            if (!usedDiskStream) {
+                if (streamStarted) {
+                    throw new Error("Disk streaming failed midway after generator started. Cannot fallback to Blob.");
+                }
+                const readableStream = new ReadableStream({
+                    async pull(controller) {
+                        try {
+                            const { value, done } = await streamGen.next();
+                            if (done) controller.close();
+                            else controller.enqueue(value);
+                        } catch (e) { controller.error(e); }
+                    }
                 });
-                fileBuf = await readPromise;
-            } else {
-                fileBuf = await file.arrayBuffer();
+                finalBlob = await new Response(readableStream, {
+                    headers: { "Content-Type": "application/octet-stream" }
+                }).blob();
+                writtenBytes = finalBlob.size;
             }
-            
-            // Calculate SHA-256 hash
-            const progressHashStart = baseProgress + 20;
-            updateProgress('enc', progressHashStart, `Calculating hash for ${file.name}...`);
-            await sleep(10);
-            const fileHash = await calculateSHA256(fileBuf);
-            
-            // Metadata
-            const meta = {
-                filename: origName,
-                extension: origExt,
-                timestamp: Date.now(),
-                vlmrsVersion: 1,
-                encryption: "AES-256-GCM",
-                kdf: { algorithm: "PBKDF2-HMAC-SHA-256", iterations: iterations },
-                tool: "VLMRS Encoder",
-                credit: "@valmortheos",
-                fileHash: fileHash
-            };
-            
-            // Derive key
-            const progressKeyStart = baseProgress + 25;
-            updateProgress('enc', progressKeyStart, `Deriving key for ${file.name}...`);
-            await sleep(50);
-            
-            const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass1), "PBKDF2", false, ["deriveKey"]);
-            const key = await crypto.subtle.deriveKey(
-                { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
-            
-            // Prepare metadata
-            const metaString = JSON.stringify(meta);
-            const metaBytes = new TextEncoder().encode(metaString);
-            
-            // Header
-            const headerBaseLen = 15;
-            const finalHeaderBuf = new ArrayBuffer(headerBaseLen);
-            const finalHeaderView = new DataView(finalHeaderBuf);
-            const finalHeader8 = new Uint8Array(finalHeaderBuf);
-            
-            finalHeader8[0] = 86; finalHeader8[1] = 76; finalHeader8[2] = 77; finalHeader8[3] = 82;
-            finalHeader8[4] = 1;
-            finalHeader8[5] = 16;
-            finalHeader8[6] = 12;
-            finalHeaderView.setUint32(7, 0, true);
-            finalHeaderView.setUint32(11, iterations, true);
-            
-            // AAD for metadata (encryptedMetaLen = 0)
-            const metadataAAD = new Uint8Array(finalHeaderBuf.slice(0));
-            
-            // Encrypt metadata
-            updateProgress('enc', progressKeyStart + 10, `Encrypting metadata for ${file.name}...`);
-            await sleep(10);
-            
-            const encryptedMeta = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: iv, additionalData: metadataAAD },
-                key,
-                metaBytes
-            );
-            
-            // Update header with actual encryptedMetaLen
-            finalHeaderView.setUint32(7, encryptedMeta.byteLength, true);
-            
-            // AAD for file (encryptedMetaLen aktual)
-            const fileAAD = new Uint8Array(finalHeaderBuf);
-            
-            // Encrypt file
-            const progressEncStart = baseProgress + 60;
-            updateProgress('enc', progressEncStart, `Encrypting ${file.name}...`);
-            await sleep(50);
-            
-            let ciphertextBuf;
-            if (isLargeFile) {
-                const chunkCount = Math.min(10, Math.ceil(fileBuf.byteLength / (10 * 1024 * 1024)));
-                const chunkSize = Math.ceil(fileBuf.byteLength / chunkCount);
-                const chunks = [];
-                
-                for (let c = 0; c < chunkCount; c++) {
-                    const start = c * chunkSize;
-                    const end = Math.min(start + chunkSize, fileBuf.byteLength);
-                    const chunk = fileBuf.slice(start, end);
-                    chunks.push(chunk);
-                    
-                    const chunkProgress = progressEncStart + ((c / chunkCount) * 30);
-                    updateProgress('enc', chunkProgress, `Encrypting ${file.name}... ${Math.round((c / chunkCount) * 100)}%`);
-                    await sleep(0);
-                }
-                
-                const combinedBuf = new Uint8Array(fileBuf.byteLength);
-                let offset = 0;
-                for (const chunk of chunks) {
-                    combinedBuf.set(new Uint8Array(chunk), offset);
-                    offset += chunk.byteLength;
-                }
-                
-                ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
-                    key,
-                    combinedBuf.buffer
-                );
-            } else {
-                ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
-                    key,
-                    fileBuf
-                );
-            }
-            
-            // Final assembly
-            const progressFinalStart = baseProgress + 92;
-            updateProgress('enc', progressFinalStart, `Finalizing ${file.name}...`);
-            await sleep(50);
-            
-            const finalBuf = new Uint8Array(15 + 16 + 12 + encryptedMeta.byteLength + ciphertextBuf.byteLength);
-            let offset2 = 0;
-            
-            finalBuf.set(new Uint8Array(finalHeaderBuf), offset2);
-            offset2 += 15;
-            
-            finalBuf.set(salt, offset2);
-            offset2 += 16;
-            
-            finalBuf.set(iv, offset2);
-            offset2 += 12;
-            
-            finalBuf.set(new Uint8Array(encryptedMeta), offset2);
-            offset2 += encryptedMeta.byteLength;
-            
-            finalBuf.set(new Uint8Array(ciphertextBuf), offset2);
-            
-            const finalBlob = new Blob([finalBuf], {type: "application/octet-stream"});
-            const blobUrl = URL.createObjectURL(finalBlob);
-            
-            encodedBlobUrls.push(blobUrl);
+
+            const blobUrl = finalBlob ? URL.createObjectURL(finalBlob) : null;
+            if (blobUrl) encodedBlobUrls.push(blobUrl);
+
             currentEncodeResults.push({
                 blob: finalBlob,
                 url: blobUrl,
+                savedToDisk: usedDiskStream,
                 originalName: origName + origExt,
                 encodedName: origName + '.vlmrs',
-                size: finalBlob.size,
-                metadata: meta,
+                size: writtenBytes,
+                metadata: { vlmrsVersion: 3, encryption: "AES-256-GCM", tool: "VLMRS Encoder", credit: "@valmortheos" },
                 name: origName + origExt,
                 type: 'application/octet-stream'
             });
@@ -766,12 +705,12 @@ const startEncoding = async () => {
         await saveHistoryEntry('encode', currentEncodeResults);
         displayDownloadButtons('enc', currentEncodeResults);
         
-        setStatus('enc', 'success', `${totalFiles} file(s) encoded successfully! Ready to download.`);
+        setStatus('enc', 'success', `${totalFiles} file(s) encoded successfully with VLMRS v3 Stream! Ready to download.`);
         document.getElementById('enc-form').style.display = 'none';
         document.getElementById('enc-reset').style.display = 'block';
         
     } catch (error) {
-        console.error(error);
+        console.error('Encoding process error:', error.message);
         setStatus('enc', 'error', 'Encoding error: ' + error.message);
     } finally {
         btn.disabled = false;
@@ -791,29 +730,47 @@ const displayDownloadButtons = (view, files) => {
         
         const originalNameDiv = document.createElement('div');
         originalNameDiv.className = 'original-name';
-        originalNameDiv.innerHTML = `
-            <span class="file-original-label">Original: ${file.originalName || file.filename}</span>
-            <span style="font-size:0.85rem; color:var(--text-secondary);">${formatBytes(file.size)}</span>
-        `;
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'file-original-label';
+        labelSpan.textContent = `${file.savedToDisk ? 'Saved to Disk' : 'Original'}: ${file.originalName || file.filename || file.name}`;
+
+        const sizeSpan = document.createElement('span');
+        sizeSpan.style.fontSize = '0.85rem';
+        sizeSpan.style.color = 'var(--text-secondary)';
+        sizeSpan.textContent = formatBytes(file.size);
+
+        originalNameDiv.appendChild(labelSpan);
+        originalNameDiv.appendChild(sizeSpan);
+
+        if (file.savedToDisk) {
+            const savedBadge = document.createElement('span');
+            savedBadge.style.color = 'var(--accent-color)';
+            savedBadge.style.fontWeight = 'bold';
+            savedBadge.textContent = '✅ Saved directly to file';
+            group.appendChild(originalNameDiv);
+            group.appendChild(savedBadge);
+        } else {
+            const renameInput = document.createElement('input');
+            renameInput.type = 'text';
+            renameInput.className = 'rename-input';
+            renameInput.value = file.encodedName || file.filename || file.name;
+            renameInput.placeholder = 'Enter custom filename...';
+            renameInput.title = 'Edit filename or leave as original';
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'btn btn-success';
+            downloadBtn.textContent = 'Download';
+            downloadBtn.onclick = () => {
+                const customName = renameInput.value.trim() || (file.encodedName || file.filename || file.name);
+                if (file.blob) downloadBlob(file.blob, customName);
+            };
+
+            group.appendChild(originalNameDiv);
+            group.appendChild(renameInput);
+            group.appendChild(downloadBtn);
+        }
         
-        const renameInput = document.createElement('input');
-        renameInput.type = 'text';
-        renameInput.className = 'rename-input';
-        renameInput.value = file.encodedName || file.filename || file.name;
-        renameInput.placeholder = 'Enter custom filename...';
-        renameInput.title = 'Edit filename or leave as original';
-        
-        const downloadBtn = document.createElement('button');
-        downloadBtn.className = 'btn btn-success';
-        downloadBtn.textContent = 'Download';
-        downloadBtn.onclick = () => {
-            const customName = renameInput.value.trim() || (file.encodedName || file.filename || file.name);
-            downloadBlob(file.blob, customName);
-        };
-        
-        group.appendChild(originalNameDiv);
-        group.appendChild(renameInput);
-        group.appendChild(downloadBtn);
         downloadArea.appendChild(group);
     });
     
@@ -835,11 +792,19 @@ const updateProgress = (view, percentage, message) => {
 const resetEncoder = () => {
     encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
     encodedBlobUrls = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
     currentEncodeFiles = [];
     currentEncodeResults = [];
-    document.getElementById('enc-file').value = '';
-    document.getElementById('enc-pass').value = '';
-    document.getElementById('enc-pass-confirm').value = '';
+
+    const p1 = document.getElementById('enc-pass');
+    const p2 = document.getElementById('enc-pass-confirm');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+
+    const fileInput = document.getElementById('enc-file');
+    if (fileInput) fileInput.value = '';
+
     document.getElementById('enc-files-list').innerHTML = '';
     document.getElementById('enc-form').style.display = 'none';
     document.getElementById('enc-download-area').style.display = 'none';
@@ -855,7 +820,9 @@ const decFileInput = document.getElementById('dec-file');
 const handleDecFileSelect = async (files) => {
     if (!files || files.length === 0) return;
     
-    currentDecodeBuffers = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
+    currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
     encryptedMetaLengths = [];
@@ -868,32 +835,35 @@ const handleDecFileSelect = async (files) => {
         }
         
         try {
-            const buffer = await file.arrayBuffer();
-            if (buffer.byteLength < 15) continue;
+            // Read minimal 15B header slice for validation
+            const headerSlice = file.slice(0, 15);
+            const headerBuf = await headerSlice.arrayBuffer();
+            if (headerBuf.byteLength < 15) continue;
             
-            const headerView = new DataView(buffer);
-            const header8 = new Uint8Array(buffer);
+            const headerView = new DataView(headerBuf);
+            const header8 = new Uint8Array(headerBuf);
             
+            // Magic check: "VLMR"
             if (header8[0] !== 86 || header8[1] !== 76 || header8[2] !== 77 || header8[3] !== 82) continue;
             
             const version = header8[4];
-            if (version !== 1) continue;
+            if (version !== 1 && version !== 2 && version !== 3) continue;
             
             const saltLen = header8[5];
             const ivLen = header8[6];
             const encryptedMetaLen = headerView.getUint32(7, true);
             const iterations = headerView.getUint32(11, true);
             
-            const headerLen = 15;
-            const totalHeaderLen = headerLen + saltLen + ivLen + encryptedMetaLen;
+            if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || iterations > 2000000 || encryptedMetaLen < 16 || encryptedMetaLen > 100 * 1024 * 1024) {
+                continue;
+            }
+            if ((version === 1 || version === 2) && file.size > 250 * 1024 * 1024) {
+                console.warn(`File ${file.name} exceeds 250 MB RAM safe limit for legacy v1/v2 decoding.`);
+                continue;
+            }
             
-            if (buffer.byteLength < totalHeaderLen) continue;
-            if (encryptedMetaLen === 0) continue;
-            
-            currentDecodeBuffers.push(buffer);
-            encryptedMetaLengths.push(encryptedMetaLen);
-            parsedHeaderLens.push(headerLen);
-            parsedMetadata.push(null);
+            file.parsedVersion = version;
+            file.parsedFileRef = file;
             validFiles.push(file);
         } catch (error) {
             console.error('Error parsing file:', file.name, error);
@@ -904,6 +874,8 @@ const handleDecFileSelect = async (files) => {
         return setStatus('dec', 'error', 'No valid .vlmrs files found.');
     }
     
+    currentDecodeFiles = validFiles;
+
     document.getElementById('dec-form').style.display = 'block';
     document.getElementById('dec-download-area').style.display = 'none';
     document.getElementById('dec-preview-area').style.display = 'none';
@@ -936,7 +908,8 @@ const displayDecoderFiles = (files) => {
         
         const fileMeta = document.createElement('div');
         fileMeta.className = 'file-meta';
-        fileMeta.textContent = `Encrypted with VLMRS v1 • Click "Decode" to decrypt`;
+        const fileVer = file.parsedVersion || 2;
+        fileMeta.textContent = `Encrypted with VLMRS v${fileVer} • Click "Decode" to decrypt`;
         
         fileInfo.appendChild(fileName);
         fileInfo.appendChild(fileMeta);
@@ -968,7 +941,12 @@ const displayDecoderFiles = (files) => {
         Object.entries(details).forEach(([key, value]) => {
             const row = document.createElement('div');
             row.className = 'detail-row';
-            row.innerHTML = `<span>${key}</span><span>${value}</span>`;
+            const kSpan = document.createElement('span');
+            kSpan.textContent = key;
+            const vSpan = document.createElement('span');
+            vSpan.textContent = String(value);
+            row.appendChild(kSpan);
+            row.appendChild(vSpan);
             detailsDiv.appendChild(row);
         });
         
@@ -990,9 +968,12 @@ decDropzone.addEventListener('drop', (e) => {
 decFileInput.addEventListener('change', (e) => handleDecFileSelect(e.target.files));
 
 const startDecoding = async () => {
-    const pass = document.getElementById('dec-pass').value;
+    const passInput = document.getElementById('dec-pass');
+    const pass = passInput ? passInput.value : '';
     if (!pass) return setStatus('dec', 'error', 'Password cannot be empty.');
-    if (!currentDecodeBuffers.length) return setStatus('dec', 'error', 'No valid files parsed.');
+
+    const decFiles = currentDecodeFiles.length ? currentDecodeFiles : document.getElementById('dec-file').files;
+    if (!decFiles || decFiles.length === 0) return setStatus('dec', 'error', 'No valid files parsed.');
     
     const btn = document.getElementById('dec-btn');
     btn.disabled = true;
@@ -1004,140 +985,220 @@ const startDecoding = async () => {
     document.getElementById('dec-progress-area').style.display = 'block';
     
     try {
-        const totalFiles = currentDecodeBuffers.length;
+        const totalFiles = decFiles.length;
+        const { decodeV3Stream } = await import('./vlmrs-streaming.js');
         
         for (let i = 0; i < totalFiles; i++) {
-            const baseProgress = (i / totalFiles) * 100;
+            const file = decFiles[i];
             
-            updateProgress('dec', baseProgress, `Processing file ${i + 1} of ${totalFiles}...`);
-            await sleep(50);
+            // Validate version
+            const headerSlice = file.slice(0, 15);
+            const headerBuf = await headerSlice.arrayBuffer();
+            const header8 = new Uint8Array(headerBuf);
+            const version = header8[4];
             
-            const buffer = currentDecodeBuffers[i];
-            const headerLen = parsedHeaderLens[i];
-            const encryptedMetaLen = encryptedMetaLengths[i];
-            
-            const headerView = new DataView(buffer);
-            const header8 = new Uint8Array(buffer);
-            
-            const saltLen = header8[5];
-            const ivLen = header8[6];
-            const iterations = headerView.getUint32(11, true);
-            
-            const saltStart = headerLen;
-            const saltEnd = saltStart + saltLen;
-            const salt = new Uint8Array(buffer.slice(saltStart, saltEnd));
-            
-            const ivStart = saltEnd;
-            const ivEnd = ivStart + ivLen;
-            const iv = new Uint8Array(buffer.slice(ivStart, ivEnd));
-            
-            const encryptedMetaStart = ivEnd;
-            const encryptedMetaEnd = encryptedMetaStart + encryptedMetaLen;
-            const encryptedMeta = buffer.slice(encryptedMetaStart, encryptedMetaEnd);
-            
-            // AAD for metadata
-            const metadataAAD = new Uint8Array(buffer.slice(0, headerLen));
-            const metadataAADView = new DataView(metadataAAD.buffer);
-            metadataAADView.setUint32(7, 0, true);
-            
-            // Derive key
-            const progressKeyStart = baseProgress + 10;
-            updateProgress('dec', progressKeyStart, `Deriving key for file ${i + 1}...`);
-            await sleep(50);
-            
-            const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
-            const key = await crypto.subtle.deriveKey(
-                { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["decrypt"]
-            );
-            
-            // Decrypt metadata
-            const progressMetaStart = baseProgress + 30;
-            updateProgress('dec', progressMetaStart, `Decrypting metadata for file ${i + 1}...`);
-            await sleep(50);
-            
-            let metadata;
-            try {
-                const decryptedMetaBuf = await crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: metadataAAD },
-                    key,
-                    encryptedMeta
+            let metadata = null;
+            let blob = null;
+            let usedDiskStream = false;
+            let writtenBytes = 0;
+            let restoredMimeType = 'application/octet-stream';
+            let defaultName = '';
+
+            if (version === 3) {
+                // Streaming decode V3
+                const streamGen = decodeV3Stream(file, pass, (ratio, msg) => {
+                    const fileProgress = ((i + ratio) / totalFiles) * 100;
+                    updateProgress('dec', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
+                });
+
+                // Pull first item to extract metadata header
+                const firstResult = await streamGen.next();
+                if (!firstResult.done && firstResult.value.type === 'metadata') {
+                    metadata = firstResult.value.metadata;
+                }
+
+                defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '');
+
+                if (metadata && metadata.mimeType) {
+                    restoredMimeType = metadata.mimeType.split(';')[0].trim() || 'application/octet-stream';
+                } else if (metadata && metadata.extension) {
+                    const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
+                    const mimeMap = {
+                        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                        'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
+                        'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
+                        'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
+                        'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
+                        'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
+                    };
+                    restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
+                }
+
+                let streamStarted = false;
+
+                // Direct File System Access API disk streaming if available
+                if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                    let handle, writable;
+                    try {
+                        const sanitizedMimeForPicker = restoredMimeType.includes('/') ? restoredMimeType : 'application/octet-stream';
+                        handle = await window.showSaveFilePicker({
+                            suggestedName: defaultName,
+                            types: [{ description: 'Decrypted File', accept: { [sanitizedMimeForPicker]: ['.' + ((metadata && metadata.extension) ? metadata.extension : 'bin').replace(/^\./, '')] } }]
+                        });
+                        writable = await handle.createWritable();
+                    } catch (pickerErr) {
+                        if (pickerErr.name === 'AbortError') throw new Error("Decryption cancelled by user.");
+                        console.warn("File picker / createWritable failed before stream consumption. Falling back to Blob:", pickerErr.message);
+                    }
+
+                    if (writable) {
+                        try {
+                            for await (const item of streamGen) {
+                                if (item.type === 'chunk') {
+                                    streamStarted = true;
+                                    await writable.write(item.data);
+                                    writtenBytes += item.data.byteLength;
+                                }
+                            }
+                            await writable.close();
+                            usedDiskStream = true;
+                        } catch (writeErr) {
+                            try { await writable.abort(); } catch (e) {}
+                            throw new Error("Disk streaming write failed midway: " + writeErr.message);
+                        }
+                    }
+                }
+
+                if (!usedDiskStream) {
+                    if (streamStarted) {
+                        throw new Error("Disk streaming failed midway after generator started. Cannot fallback to Blob.");
+                    }
+                    const decryptedReadableStream = new ReadableStream({
+                        async pull(controller) {
+                            try {
+                                const { value, done } = await streamGen.next();
+                                if (done) controller.close();
+                                else if (value && value.type === 'chunk') controller.enqueue(value.data);
+                            } catch (e) { controller.error(e); }
+                        }
+                    });
+                    blob = await new Response(decryptedReadableStream, {
+                        headers: { "Content-Type": restoredMimeType }
+                    }).blob();
+                    writtenBytes = blob.size;
+                } else {
+                    blob = null;
+                }
+            } else {
+                if (file.size > 250 * 1024 * 1024) {
+                    throw new Error(`File ${file.name} exceeds the 250 MB RAM safe limit for legacy V1/V2 full-buffer decoding.`);
+                }
+
+                // Legacy v1 & v2 decoding
+                const fullBuffer = await file.arrayBuffer();
+                const headerView = new DataView(fullBuffer);
+                const saltLen = header8[5];
+                const ivLen = header8[6];
+                const encryptedMetaLen = headerView.getUint32(7, true);
+                const iterations = headerView.getUint32(11, true);
+
+                if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || iterations > 2000000 || encryptedMetaLen < 16) {
+                    throw new Error("Invalid or unsafe header parameters in legacy container");
+                }
+
+                const salt = new Uint8Array(fullBuffer.slice(15, 15 + saltLen));
+                let metaIv, fileIv, encMetaStart;
+
+                if (version === 1) {
+                    metaIv = new Uint8Array(fullBuffer.slice(31, 31 + ivLen));
+                    fileIv = metaIv;
+                    encMetaStart = 31 + ivLen;
+                } else {
+                    metaIv = new Uint8Array(fullBuffer.slice(31, 31 + ivLen));
+                    fileIv = new Uint8Array(fullBuffer.slice(31 + ivLen, 31 + (ivLen * 2)));
+                    encMetaStart = 31 + (ivLen * 2);
+                }
+
+                const encMetaEnd = encMetaStart + encryptedMetaLen;
+                const encMeta = fullBuffer.slice(encMetaStart, encMetaEnd);
+                const ciphertext = fullBuffer.slice(encMetaEnd);
+
+                const metadataAAD = new Uint8Array(fullBuffer.slice(0, 15));
+                const metadataAADView = new DataView(metadataAAD.buffer);
+                metadataAADView.setUint32(7, 0, true);
+
+                const passBytes = new TextEncoder().encode(pass);
+                const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
+                passBytes.fill(0);
+
+                const key = await crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+                    keyMaterial,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["decrypt"]
                 );
+
+                const decMetaBuf = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: metaIv, additionalData: metadataAAD },
+                    key,
+                    encMeta
+                );
+                metadata = JSON.parse(new TextDecoder().decode(decMetaBuf));
                 
-                const metaString = new TextDecoder().decode(decryptedMetaBuf);
-                metadata = JSON.parse(metaString);
-                parsedMetadata[i] = metadata;
-            } catch (error) {
-                console.error('Metadata decryption failed:', error);
-                throw new Error('Failed to decrypt metadata - incorrect password or corrupted file');
-            }
-            
-            // Decrypt file
-            const progressDecStart = baseProgress + 50;
-            updateProgress('dec', progressDecStart, `Decrypting file ${i + 1}...`);
-            await sleep(50);
-            
-            const ciphertextStart = encryptedMetaEnd;
-            const ciphertext = buffer.slice(ciphertextStart);
-            
-            // AAD for file
-            const fileAAD = new Uint8Array(buffer.slice(0, headerLen));
-            
-            let decryptedBuf;
-            
-            try {
-                decryptedBuf = await crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
+                const fileAAD = new Uint8Array(fullBuffer.slice(0, 15));
+                const decFileBuf = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
                     key,
                     ciphertext
                 );
-            } catch (error) {
-                console.error('File decryption failed:', error);
-                throw new Error('Failed to decrypt file content - incorrect password or corrupted file');
-            }
-            
-            // Verify hash
-            const progressHashStart = baseProgress + 85;
-            updateProgress('dec', progressHashStart, `Verifying integrity for file ${i + 1}...`);
-            await sleep(10);
-            
-            let hashVerified = false;
-            if (metadata && metadata.fileHash) {
-                const decryptedHash = await calculateSHA256(decryptedBuf);
-                hashVerified = decryptedHash === metadata.fileHash;
-                if (!hashVerified) {
-                    console.warn('Hash verification failed for file:', metadata.filename);
+
+                if (metadata && metadata.fileHash) {
+                    const decHash = await calculateSHA256(decFileBuf);
+                    if (decHash !== metadata.fileHash) {
+                        try { new Uint8Array(decFileBuf).fill(0); } catch(e){}
+                        throw new Error(`File integrity verification failed for ${metadata.filename || 'file'} - SHA-256 hash mismatch!`);
+                    }
                 }
+
+                if (metadata && metadata.mimeType) {
+                    restoredMimeType = metadata.mimeType.split(';')[0].trim() || 'application/octet-stream';
+                } else if (metadata && metadata.extension) {
+                    const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
+                    const mimeMap = {
+                        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                        'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
+                        'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
+                        'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
+                        'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
+                        'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
+                    };
+                    restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
+                }
+
+                blob = new Blob([decFileBuf], { type: restoredMimeType });
+                writtenBytes = blob.size;
+                usedDiskStream = false;
             }
-            
-            const progressFinalStart = baseProgress + 92;
-            updateProgress('dec', progressFinalStart, `Finalizing file ${i + 1}...`);
-            await sleep(50);
-            
-            let defaultName;
-            if (metadata && metadata.filename && metadata.extension) {
-                defaultName = metadata.filename + metadata.extension;
-            } else {
-                const originalFile = document.getElementById('dec-file').files[i];
-                defaultName = originalFile ? originalFile.name.replace(/\.vlmrs$/i, '') : `decrypted_${i + 1}`;
+
+            if (!defaultName) {
+                defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '') || `decrypted_${i + 1}`;
             }
-            
-            const blob = new Blob([decryptedBuf]);
-            const blobUrl = URL.createObjectURL(blob);
-            
-            decryptedBlobs.push(blobUrl);
+
+            const blobUrl = blob ? URL.createObjectURL(blob) : null;
+            if (blobUrl) decryptedBlobs.push(blobUrl);
+
             currentDecodeResults.push({
                 blob: blob,
                 url: blobUrl,
+                savedToDisk: usedDiskStream,
+                originalName: defaultName,
                 filename: defaultName,
-                size: blob.size,
+                size: writtenBytes,
                 metadata: metadata || {},
-                hashVerified: hashVerified,
+                hashVerified: true,
                 name: defaultName,
-                type: 'application/octet-stream'
+                type: restoredMimeType
             });
             
             const finalProgress = ((i + 1) / totalFiles) * 100;
@@ -1155,7 +1216,6 @@ const startDecoding = async () => {
         document.getElementById('dec-reset').style.display = 'block';
         
     } catch (error) {
-        console.error(error);
         setStatus('dec', 'error', 'Decryption failed! ' + error.message);
     } finally {
         btn.disabled = false;
@@ -1182,13 +1242,13 @@ const displayDecryptedPreviews = (files) => {
         
         const toggleBtn = document.createElement('button');
         toggleBtn.className = 'file-item-toggle';
-        toggleBtn.textContent = 'Preview';
+        toggleBtn.textContent = 'Details';
         toggleBtn.onclick = (e) => {
             e.stopPropagation();
             const content = header.nextElementSibling;
             const isHidden = content.style.display === 'none';
             content.style.display = isHidden ? 'block' : 'none';
-            toggleBtn.textContent = isHidden ? 'Hide' : 'Preview';
+            toggleBtn.textContent = isHidden ? 'Hide' : 'Details';
         };
         
         header.appendChild(fileName);
@@ -1200,7 +1260,17 @@ const displayDecryptedPreviews = (files) => {
         
         const previewArea = document.createElement('div');
         previewArea.className = 'preview-area';
-        generatePreview(file.blob, previewArea, file.filename || file.name);
+
+        if (file.savedToDisk) {
+            const diskInfo = document.createElement('div');
+            diskInfo.style.padding = '0.75rem';
+            diskInfo.style.color = 'var(--accent-color)';
+            diskInfo.style.fontWeight = 'bold';
+            diskInfo.textContent = '✅ Saved directly to disk (No in-memory preview)';
+            previewArea.appendChild(diskInfo);
+        } else {
+            generatePreview(file.blob, previewArea, file.filename || file.name);
+        }
         
         content.appendChild(previewArea);
         
@@ -1220,6 +1290,9 @@ const displayDecryptedPreviews = (files) => {
         
         if (metadata.filename) {
             detailItems['Filename'] = metadata.filename + (metadata.extension || '');
+        }
+        if (metadata.mimeType || file.type) {
+            detailItems['Original MIME Type'] = metadata.mimeType || file.type;
         }
         if (metadata.timestamp) {
             detailItems['Encrypted On'] = new Date(metadata.timestamp).toLocaleString();
@@ -1249,7 +1322,10 @@ const displayDecryptedPreviews = (files) => {
         Object.entries(detailItems).forEach(([key, value]) => {
             const item = document.createElement('div');
             item.className = 'meta-item';
-            item.innerHTML = `<strong>${key}:</strong> ${value}`;
+            const strong = document.createElement('strong');
+            strong.textContent = key + ': ';
+            item.appendChild(strong);
+            item.appendChild(document.createTextNode(String(value)));
             metaGrid.appendChild(item);
         });
         
@@ -1267,13 +1343,21 @@ const displayDecryptedPreviews = (files) => {
 const resetDecoder = () => {
     decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
     decryptedBlobs = [];
-    currentDecodeBuffers = [];
+    previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    previewBlobUrls = [];
+
+    currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
     encryptedMetaLengths = [];
     currentDecodeResults = [];
-    document.getElementById('dec-file').value = '';
-    document.getElementById('dec-pass').value = '';
+
+    const p = document.getElementById('dec-pass');
+    if (p) p.value = '';
+
+    const f = document.getElementById('dec-file');
+    if (f) f.value = '';
+
     document.getElementById('dec-files-list').innerHTML = '';
     document.getElementById('dec-form').style.display = 'none';
     document.getElementById('dec-download-area').style.display = 'none';
@@ -1282,3 +1366,12 @@ const resetDecoder = () => {
     document.getElementById('dec-status').style.display = 'none';
     document.getElementById('dec-reset').style.display = 'none';
 };
+
+// Revoke resources on page unload as best-effort cleanup
+window.addEventListener('beforeunload', () => {
+    try {
+        encodedBlobUrls.forEach(url => URL.revokeObjectURL(url));
+        decryptedBlobs.forEach(url => URL.revokeObjectURL(url));
+        previewBlobUrls.forEach(url => URL.revokeObjectURL(url));
+    } catch (e) {}
+});
