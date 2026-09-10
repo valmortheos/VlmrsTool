@@ -262,6 +262,7 @@ const clearHistory = async () => {
 
 // Global state
 let currentEncodeFiles = [];
+let currentDecodeFiles = [];
 let currentDecodeBuffers = [];
 let parsedMetadata = [];
 let parsedHeaderLens = [];
@@ -595,193 +596,27 @@ const startEncoding = async () => {
         const totalFiles = currentEncodeFiles.length;
         const iterations = 100000;
         
+        // Dynamically import streaming module
+        const { encodeV3Stream } = await import('./vlmrs-streaming.js');
+
         for (let i = 0; i < totalFiles; i++) {
             const file = currentEncodeFiles[i];
-            const fileSize = file.size;
-            const isLargeFile = fileSize > 100 * 1024 * 1024;
-            
-            const baseProgress = (i / totalFiles) * 100;
-            updateProgress('enc', baseProgress, `Preparing ${file.name}...`);
-            await sleep(50);
             
             const lastDot = file.name.lastIndexOf('.');
             const origName = lastDot !== -1 && lastDot !== 0 ? file.name.substring(0, lastDot) : file.name;
             const origExt = lastDot !== -1 && lastDot !== 0 ? file.name.substring(lastDot) : '';
             
-            // Read file first
-            const progressReadStart = baseProgress + 5;
-            updateProgress('enc', progressReadStart, `Reading ${file.name}...`);
-            await sleep(50);
-            
-            let fileBuf;
-            if (isLargeFile) {
-                const reader = new FileReader();
-                const readPromise = new Promise((resolve, reject) => {
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.onerror = reject;
-                    reader.onprogress = (e) => {
-                        if (e.lengthComputable) {
-                            const readProgress = progressReadStart + ((e.loaded / e.total) * 15);
-                            updateProgress('enc', readProgress, `Reading ${file.name}... ${Math.round((e.loaded / e.total) * 100)}%`);
-                        }
-                    };
-                    reader.readAsArrayBuffer(file);
-                });
-                fileBuf = await readPromise;
-            } else {
-                fileBuf = await file.arrayBuffer();
+            const streamChunks = [];
+            const streamGen = encodeV3Stream(file, pass1, iterations, (ratio, msg) => {
+                const fileProgress = ((i + ratio) / totalFiles) * 100;
+                updateProgress('enc', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
+            });
+
+            for await (const chunkBytes of streamGen) {
+                streamChunks.push(chunkBytes);
             }
-            
-            // Calculate SHA-256 hash
-            const progressHashStart = baseProgress + 20;
-            updateProgress('enc', progressHashStart, `Calculating hash for ${file.name}...`);
-            await sleep(10);
-            const fileHash = await calculateSHA256(fileBuf);
-            
-            // Metadata (sensitive original MIME type stored encrypted)
-            const meta = {
-                filename: origName,
-                extension: origExt,
-                mimeType: file.type || 'application/octet-stream',
-                timestamp: Date.now(),
-                vlmrsVersion: 2,
-                encryption: "AES-256-GCM",
-                kdf: { algorithm: "PBKDF2-HMAC-SHA-256", iterations: iterations },
-                tool: "VLMRS Encoder",
-                credit: "@valmortheos",
-                fileHash: fileHash
-            };
-            
-            const salt = crypto.getRandomValues(new Uint8Array(16));
-            const metaIv = crypto.getRandomValues(new Uint8Array(12));
-            const fileIv = crypto.getRandomValues(new Uint8Array(12));
 
-            // Derive key with best-effort memory zeroization of password byte array
-            const progressKeyStart = baseProgress + 25;
-            updateProgress('enc', progressKeyStart, `Deriving key for ${file.name}...`);
-            await sleep(50);
-            
-            const passBytes = new TextEncoder().encode(pass1);
-            const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
-            passBytes.fill(0); // Best-effort zeroize password byte buffer
-
-            const key = await crypto.subtle.deriveKey(
-                { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
-            
-            // Prepare metadata
-            const metaString = JSON.stringify(meta);
-            const metaBytes = new TextEncoder().encode(metaString);
-            
-            // Header
-            const headerBaseLen = 15;
-            const finalHeaderBuf = new ArrayBuffer(headerBaseLen);
-            const finalHeaderView = new DataView(finalHeaderBuf);
-            const finalHeader8 = new Uint8Array(finalHeaderBuf);
-            
-            finalHeader8[0] = 86; finalHeader8[1] = 76; finalHeader8[2] = 77; finalHeader8[3] = 82;
-            finalHeader8[4] = 2; // Version 2
-            finalHeader8[5] = 16;
-            finalHeader8[6] = 12;
-            finalHeaderView.setUint32(7, 0, true);
-            finalHeaderView.setUint32(11, iterations, true);
-            
-            // AAD for metadata (encryptedMetaLen = 0)
-            const metadataAAD = new Uint8Array(finalHeaderBuf.slice(0));
-            
-            // Encrypt metadata with distinct metaIv
-            updateProgress('enc', progressKeyStart + 10, `Encrypting metadata for ${file.name}...`);
-            await sleep(10);
-            
-            const encryptedMeta = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: metaIv, additionalData: metadataAAD },
-                key,
-                metaBytes
-            );
-            metaBytes.fill(0); // Best-effort zeroize plaintext metadata byte buffer
-            
-            // Update header with actual encryptedMetaLen
-            finalHeaderView.setUint32(7, encryptedMeta.byteLength, true);
-            
-            // AAD for file (encryptedMetaLen aktual)
-            const fileAAD = new Uint8Array(finalHeaderBuf);
-            
-            // Encrypt file with distinct fileIv
-            const progressEncStart = baseProgress + 60;
-            updateProgress('enc', progressEncStart, `Encrypting ${file.name}...`);
-            await sleep(50);
-            
-            let ciphertextBuf;
-            if (isLargeFile) {
-                const chunkCount = Math.min(10, Math.ceil(fileBuf.byteLength / (10 * 1024 * 1024)));
-                const chunkSize = Math.ceil(fileBuf.byteLength / chunkCount);
-                const chunks = [];
-                
-                for (let c = 0; c < chunkCount; c++) {
-                    const start = c * chunkSize;
-                    const end = Math.min(start + chunkSize, fileBuf.byteLength);
-                    const chunk = fileBuf.slice(start, end);
-                    chunks.push(chunk);
-                    
-                    const chunkProgress = progressEncStart + ((c / chunkCount) * 30);
-                    updateProgress('enc', chunkProgress, `Encrypting ${file.name}... ${Math.round((c / chunkCount) * 100)}%`);
-                    await sleep(0);
-                }
-                
-                const combinedBuf = new Uint8Array(fileBuf.byteLength);
-                let offset = 0;
-                for (const chunk of chunks) {
-                    combinedBuf.set(new Uint8Array(chunk), offset);
-                    offset += chunk.byteLength;
-                }
-                
-                ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
-                    key,
-                    combinedBuf.buffer
-                );
-                combinedBuf.fill(0); // Best-effort zeroize combined plaintext buffer
-            } else {
-                ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
-                    key,
-                    fileBuf
-                );
-            }
-            
-            // Best-effort zeroization of plaintext input file buffer
-            try { new Uint8Array(fileBuf).fill(0); } catch(e) {}
-
-            // Final assembly: Header(15) + Salt(16) + MetaIV(12) + FileIV(12) + EncryptedMeta + FileCiphertext
-            const progressFinalStart = baseProgress + 92;
-            updateProgress('enc', progressFinalStart, `Finalizing ${file.name}...`);
-            await sleep(50);
-            
-            const finalBuf = new Uint8Array(15 + 16 + 12 + 12 + encryptedMeta.byteLength + ciphertextBuf.byteLength);
-            let offset2 = 0;
-            
-            finalBuf.set(new Uint8Array(finalHeaderBuf), offset2);
-            offset2 += 15;
-            
-            finalBuf.set(salt, offset2);
-            offset2 += 16;
-            
-            finalBuf.set(metaIv, offset2);
-            offset2 += 12;
-
-            finalBuf.set(fileIv, offset2);
-            offset2 += 12;
-            
-            finalBuf.set(new Uint8Array(encryptedMeta), offset2);
-            offset2 += encryptedMeta.byteLength;
-            
-            finalBuf.set(new Uint8Array(ciphertextBuf), offset2);
-            
-            const finalBlob = new Blob([finalBuf], {type: "application/octet-stream"});
+            const finalBlob = new Blob(streamChunks, { type: "application/octet-stream" });
             const blobUrl = URL.createObjectURL(finalBlob);
             
             encodedBlobUrls.push(blobUrl);
@@ -791,7 +626,7 @@ const startEncoding = async () => {
                 originalName: origName + origExt,
                 encodedName: origName + '.vlmrs',
                 size: finalBlob.size,
-                metadata: meta,
+                metadata: { vlmrsVersion: 3, encryption: "AES-256-GCM", tool: "VLMRS Encoder", credit: "@valmortheos" },
                 name: origName + origExt,
                 type: 'application/octet-stream'
             });
@@ -804,7 +639,7 @@ const startEncoding = async () => {
         await saveHistoryEntry('encode', currentEncodeResults);
         displayDownloadButtons('enc', currentEncodeResults);
         
-        setStatus('enc', 'success', `${totalFiles} file(s) encoded successfully! Ready to download.`);
+        setStatus('enc', 'success', `${totalFiles} file(s) encoded successfully with VLMRS v3 Stream! Ready to download.`);
         document.getElementById('enc-form').style.display = 'none';
         document.getElementById('enc-reset').style.display = 'block';
         
@@ -908,6 +743,7 @@ const handleDecFileSelect = async (files) => {
     if (!files || files.length === 0) return;
     
     currentDecodeBuffers = [];
+    currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
     encryptedMetaLengths = [];
@@ -920,42 +756,31 @@ const handleDecFileSelect = async (files) => {
         }
         
         try {
-            const buffer = await file.arrayBuffer();
-            // Header validation & offset overflow checks
-            if (buffer.byteLength < 15) continue;
+            // Read minimal 15B header slice for validation
+            const headerSlice = file.slice(0, 15);
+            const headerBuf = await headerSlice.arrayBuffer();
+            if (headerBuf.byteLength < 15) continue;
             
-            const headerView = new DataView(buffer);
-            const header8 = new Uint8Array(buffer);
+            const headerView = new DataView(headerBuf);
+            const header8 = new Uint8Array(headerBuf);
             
             // Magic check: "VLMR"
             if (header8[0] !== 86 || header8[1] !== 76 || header8[2] !== 77 || header8[3] !== 82) continue;
             
             const version = header8[4];
-            if (version !== 1 && version !== 2) continue;
+            if (version !== 1 && version !== 2 && version !== 3) continue;
             
             const saltLen = header8[5];
             const ivLen = header8[6];
             const encryptedMetaLen = headerView.getUint32(7, true);
             const iterations = headerView.getUint32(11, true);
             
-            // Validate header parameters to prevent buffer overflow/malformed header exploits
             if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || encryptedMetaLen === 0 || encryptedMetaLen > 100 * 1024 * 1024) {
                 continue;
             }
-
-            const headerLen = 15;
-            const ivTotalLen = version === 2 ? (ivLen * 2) : ivLen;
-            const totalHeaderLen = headerLen + saltLen + ivTotalLen + encryptedMetaLen;
             
-            if (buffer.byteLength < totalHeaderLen) continue;
-            
-            currentDecodeBuffers.push(buffer);
-            encryptedMetaLengths.push(encryptedMetaLen);
-            parsedHeaderLens.push(headerLen);
-            parsedMetadata.push(null);
-
-            // Attach parsed version to file item for accurate UI display
             file.parsedVersion = version;
+            file.parsedFileRef = file;
             validFiles.push(file);
         } catch (error) {
             console.error('Error parsing file:', file.name, error);
@@ -966,6 +791,8 @@ const handleDecFileSelect = async (files) => {
         return setStatus('dec', 'error', 'No valid .vlmrs files found.');
     }
     
+    currentDecodeFiles = validFiles;
+
     document.getElementById('dec-form').style.display = 'block';
     document.getElementById('dec-download-area').style.display = 'none';
     document.getElementById('dec-preview-area').style.display = 'none';
@@ -1061,7 +888,9 @@ const startDecoding = async () => {
     const passInput = document.getElementById('dec-pass');
     const pass = passInput ? passInput.value : '';
     if (!pass) return setStatus('dec', 'error', 'Password cannot be empty.');
-    if (!currentDecodeBuffers.length) return setStatus('dec', 'error', 'No valid files parsed.');
+
+    const decFiles = currentDecodeFiles.length ? currentDecodeFiles : document.getElementById('dec-file').files;
+    if (!decFiles || decFiles.length === 0) return setStatus('dec', 'error', 'No valid files parsed.');
     
     const btn = document.getElementById('dec-btn');
     btn.disabled = true;
@@ -1073,152 +902,113 @@ const startDecoding = async () => {
     document.getElementById('dec-progress-area').style.display = 'block';
     
     try {
-        const totalFiles = currentDecodeBuffers.length;
+        const totalFiles = decFiles.length;
+        const { decodeV3Stream } = await import('./vlmrs-streaming.js');
         
         for (let i = 0; i < totalFiles; i++) {
-            const baseProgress = (i / totalFiles) * 100;
+            const file = decFiles[i];
             
-            updateProgress('dec', baseProgress, `Processing file ${i + 1} of ${totalFiles}...`);
-            await sleep(50);
-            
-            const buffer = currentDecodeBuffers[i];
-            const headerLen = parsedHeaderLens[i];
-            const encryptedMetaLen = encryptedMetaLengths[i];
-            
-            const headerView = new DataView(buffer);
-            const header8 = new Uint8Array(buffer);
-            
-            const saltLen = header8[5];
-            const ivLen = header8[6];
-            const iterations = headerView.getUint32(11, true);
-            
+            // Validate version
+            const headerSlice = file.slice(0, 15);
+            const headerBuf = await headerSlice.arrayBuffer();
+            const header8 = new Uint8Array(headerBuf);
             const version = header8[4];
-            const saltStart = headerLen;
-            const saltEnd = saltStart + saltLen;
-            const salt = new Uint8Array(buffer.slice(saltStart, saltEnd));
             
-            let metaIv, fileIv, encryptedMetaStart;
+            let metadata = null;
+            let decryptedChunks = [];
 
-            if (version === 1) {
-                const ivStart = saltEnd;
-                const ivEnd = ivStart + ivLen;
-                metaIv = new Uint8Array(buffer.slice(ivStart, ivEnd));
-                fileIv = metaIv;
-                encryptedMetaStart = ivEnd;
+            if (version === 3) {
+                // Streaming decode V3
+                const streamGen = decodeV3Stream(file, pass, (ratio, msg) => {
+                    const fileProgress = ((i + ratio) / totalFiles) * 100;
+                    updateProgress('dec', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
+                });
+
+                for await (const item of streamGen) {
+                    if (item.type === 'metadata') {
+                        metadata = item.metadata;
+                    } else if (item.type === 'chunk') {
+                        decryptedChunks.push(item.data);
+                    }
+                }
             } else {
-                const metaIvStart = saltEnd;
-                const metaIvEnd = metaIvStart + ivLen;
-                metaIv = new Uint8Array(buffer.slice(metaIvStart, metaIvEnd));
+                // Legacy v1 & v2 decoding
+                const fullBuffer = await file.arrayBuffer();
+                const headerView = new DataView(fullBuffer);
+                const saltLen = header8[5];
+                const ivLen = header8[6];
+                const encryptedMetaLen = headerView.getUint32(7, true);
+                const iterations = headerView.getUint32(11, true);
 
-                const fileIvStart = metaIvEnd;
-                const fileIvEnd = fileIvStart + ivLen;
-                fileIv = new Uint8Array(buffer.slice(fileIvStart, fileIvEnd));
-                encryptedMetaStart = fileIvEnd;
-            }
-            
-            const encryptedMetaEnd = encryptedMetaStart + encryptedMetaLen;
-            const encryptedMeta = buffer.slice(encryptedMetaStart, encryptedMetaEnd);
-            
-            // AAD for metadata
-            const metadataAAD = new Uint8Array(buffer.slice(0, headerLen));
-            const metadataAADView = new DataView(metadataAAD.buffer);
-            metadataAADView.setUint32(7, 0, true);
-            
-            // Derive key with best-effort memory zeroization of password byte array
-            const progressKeyStart = baseProgress + 10;
-            updateProgress('dec', progressKeyStart, `Deriving key for file ${i + 1}...`);
-            await sleep(50);
-            
-            const passBytes = new TextEncoder().encode(pass);
-            const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
-            passBytes.fill(0); // Best-effort zeroize password byte buffer
+                const salt = new Uint8Array(fullBuffer.slice(15, 15 + saltLen));
+                let metaIv, fileIv, encMetaStart;
 
-            const key = await crypto.subtle.deriveKey(
-                { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["decrypt"]
-            );
-            
-            // Decrypt metadata
-            const progressMetaStart = baseProgress + 30;
-            updateProgress('dec', progressMetaStart, `Decrypting metadata for file ${i + 1}...`);
-            await sleep(50);
-            
-            let metadata;
-            try {
-                const decryptedMetaBuf = await crypto.subtle.decrypt(
+                if (version === 1) {
+                    metaIv = new Uint8Array(fullBuffer.slice(31, 31 + ivLen));
+                    fileIv = metaIv;
+                    encMetaStart = 31 + ivLen;
+                } else {
+                    metaIv = new Uint8Array(fullBuffer.slice(31, 31 + ivLen));
+                    fileIv = new Uint8Array(fullBuffer.slice(31 + ivLen, 31 + (ivLen * 2)));
+                    encMetaStart = 31 + (ivLen * 2);
+                }
+
+                const encMetaEnd = encMetaStart + encryptedMetaLen;
+                const encMeta = fullBuffer.slice(encMetaStart, encMetaEnd);
+                const ciphertext = fullBuffer.slice(encMetaEnd);
+
+                const metadataAAD = new Uint8Array(fullBuffer.slice(0, 15));
+                const metadataAADView = new DataView(metadataAAD.buffer);
+                metadataAADView.setUint32(7, 0, true);
+
+                const passBytes = new TextEncoder().encode(pass);
+                const keyMaterial = await crypto.subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveKey"]);
+                passBytes.fill(0);
+
+                const key = await crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+                    keyMaterial,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["decrypt"]
+                );
+
+                const decMetaBuf = await crypto.subtle.decrypt(
                     { name: "AES-GCM", iv: metaIv, additionalData: metadataAAD },
                     key,
-                    encryptedMeta
+                    encMeta
                 );
+                metadata = JSON.parse(new TextDecoder().decode(decMetaBuf));
                 
-                const metaString = new TextDecoder().decode(decryptedMetaBuf);
-                try { new Uint8Array(decryptedMetaBuf).fill(0); } catch(e){} // Zeroize metadata plaintext buffer
-
-                metadata = JSON.parse(metaString);
-                parsedMetadata[i] = metadata;
-            } catch (error) {
-                throw new Error('Failed to decrypt metadata - incorrect password or corrupted file');
-            }
-            
-            // Decrypt file
-            const progressDecStart = baseProgress + 50;
-            updateProgress('dec', progressDecStart, `Decrypting file ${i + 1}...`);
-            await sleep(50);
-            
-            const ciphertextStart = encryptedMetaEnd;
-            const ciphertext = buffer.slice(ciphertextStart);
-            
-            // AAD for file
-            const fileAAD = new Uint8Array(buffer.slice(0, headerLen));
-            
-            let decryptedBuf;
-            
-            try {
-                decryptedBuf = await crypto.subtle.decrypt(
+                const fileAAD = new Uint8Array(fullBuffer.slice(0, 15));
+                const decFileBuf = await crypto.subtle.decrypt(
                     { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
                     key,
                     ciphertext
                 );
-            } catch (error) {
-                throw new Error('Failed to decrypt file content - incorrect password or corrupted file');
-            }
-            
-            // Verify hash
-            const progressHashStart = baseProgress + 85;
-            updateProgress('dec', progressHashStart, `Verifying integrity for file ${i + 1}...`);
-            await sleep(10);
-            
-            let hashVerified = false;
-            if (metadata && metadata.fileHash) {
-                const decryptedHash = await calculateSHA256(decryptedBuf);
-                hashVerified = decryptedHash === metadata.fileHash;
-                if (!hashVerified) {
-                    try { new Uint8Array(decryptedBuf).fill(0); } catch (e) {}
-                    throw new Error(`File integrity verification failed for ${metadata.filename || 'file'} - hash mismatch!`);
+
+                if (metadata && metadata.fileHash) {
+                    const decHash = await calculateSHA256(decFileBuf);
+                    if (decHash !== metadata.fileHash) {
+                        try { new Uint8Array(decFileBuf).fill(0); } catch(e){}
+                        throw new Error(`File integrity verification failed for ${metadata.filename || 'file'} - SHA-256 hash mismatch!`);
+                    }
                 }
+
+                decryptedChunks.push(new Uint8Array(decFileBuf));
             }
-            
-            const progressFinalStart = baseProgress + 92;
-            updateProgress('dec', progressFinalStart, `Finalizing file ${i + 1}...`);
-            await sleep(50);
             
             let defaultName;
             if (metadata && metadata.filename && metadata.extension) {
                 defaultName = metadata.filename + metadata.extension;
             } else {
-                const originalFile = document.getElementById('dec-file').files[i];
-                defaultName = originalFile ? originalFile.name.replace(/\.vlmrs$/i, '') : `decrypted_${i + 1}`;
+                defaultName = file.name.replace(/\.vlmrs$/i, '') || `decrypted_${i + 1}`;
             }
             
-            // Determine original MIME type only after successful decryption and verification
             let restoredMimeType = 'application/octet-stream';
             if (metadata && metadata.mimeType) {
                 restoredMimeType = metadata.mimeType;
             } else if (metadata && metadata.extension) {
-                // Backward compatibility for legacy .vlmrs files missing metadata.mimeType
                 const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
                 const mimeMap = {
                     'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
@@ -1231,7 +1021,7 @@ const startDecoding = async () => {
                 restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
             }
 
-            const blob = new Blob([decryptedBuf], { type: restoredMimeType });
+            const blob = new Blob(decryptedChunks, { type: restoredMimeType });
             const blobUrl = URL.createObjectURL(blob);
             
             decryptedBlobs.push(blobUrl);
@@ -1241,7 +1031,7 @@ const startDecoding = async () => {
                 filename: defaultName,
                 size: blob.size,
                 metadata: metadata || {},
-                hashVerified: hashVerified,
+                hashVerified: true,
                 name: defaultName,
                 type: restoredMimeType
             });
@@ -1384,6 +1174,7 @@ const resetDecoder = () => {
         try { new Uint8Array(buf).fill(0); } catch (e) {}
     });
     currentDecodeBuffers = [];
+    currentDecodeFiles = [];
     parsedMetadata = [];
     parsedHeaderLens = [];
     encryptedMetaLengths = [];
