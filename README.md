@@ -1,146 +1,114 @@
-# 🔐 VLMRS Tool
+🔐 VLMRS Tool
 
-Secure client-side multi-file encoder & decoder dengan enkripsi AES-256-GCM. Semua proses berjalan di browser, file Anda tidak pernah meninggalkan perangkat.
+Secure client-side multi-file encoder & decoder dengan enkripsi AES-256-GCM. Seluruh proses dilakukan di browser, tanpa mengunggah file ke server.
 
-## ✨ Fitur Utama
+✨ Fitur Utama
 
-- 🛡️ **Enkripsi AES-256-GCM** dengan PBKDF2 key derivation (100.000 iterasi)
-- 📁 **Multi-file support** — encode/decode banyak file sekaligus
-- 🔒 **Metadata terenkripsi** — nama file, timestamp, dan hash tersembunyi dari mata-mata
-- ✅ **Integritas terverifikasi** — SHA-256 hash memastikan file tidak korup
-- 📦 **Bulk download** — simpan semua file sebagai ZIP atau unduh satu per satu
-- 👁️ **Preview file** — lihat gambar, video, audio, PDF, dan teks sebelum download
-- 📊 **History operasi** — lacak aktivitas encode/decode (tersimpan di IndexedDB)
-- 🎨 **UI modern** — dark-mode friendly, responsive, dan intuitif
-- 🔄 **Drag & drop** — cukup seret file ke halaman
+- 🛡️ AES-256-GCM dengan PBKDF2-HMAC-SHA-256
+- 📁 Multi-file support untuk encode & decode
+- 🔒 Encrypted metadata — nama file, MIME, dan informasi lainnya
+- 🔐 Per-chunk encryption dengan nonce unik
+- ✅ SHA-256 integrity verification
+- 📦 ZIP & individual download
+- 👁️ File preview — gambar, video, audio, PDF, dan teks
+- 💾 Direct-to-disk streaming untuk file besar pada browser yang mendukung
+- 🎨 Responsive modern UI
+- 🔄 Drag & drop
+- 📜 Operation history
 
-## 🛠️ Instalasi Lokal
+🚀 Cara Pakai
 
-### Prasyarat
-- Web browser modern (Chrome, Firefox, Safari, Edge)
-- Git (opsional, untuk clone)
-- Tidak perlu Node.js atau server — cukup buka file HTML langsung!
+Encode
 
-### Langkah Instalasi
+1. Buka Encoder
+2. Pilih atau drop file
+3. Masukkan password
+4. Klik Encode All Files
+5. Simpan file ".vlmrs"
 
-#### Metode 1: Git Clone (Recommended)
+Decode
 
-```bash
-# Clone repository
+1. Buka Decoder
+2. Pilih file ".vlmrs"
+3. Masukkan password
+4. Klik Decode & Preview All
+5. Preview atau simpan file hasil decode
+
+📐 Format VLMRS
+
+VLMRS menggunakan container binary dengan metadata terenkripsi dan payload file yang diproses secara authenticated streaming.
+
+VLMRS Container
+├── Header
+├── Salt
+├── Encrypted Metadata
+└── Encrypted File Chunks
+    ├── Chunk 0
+    ├── Chunk 1
+    ├── Chunk 2
+    └── ...
+
+V3 menggunakan AES-256-GCM per chunk, nonce acak 12-byte, dan authenticated data untuk mengikat setiap chunk dengan header serta indeksnya.
+
+🛡️ Keamanan
+
+- AES-256-GCM untuk confidentiality dan authentication
+- PBKDF2-HMAC-SHA-256 dengan 100.000 iterasi
+- Random salt untuk setiap file
+- Unique nonce untuk setiap encrypted chunk
+- Encrypted metadata menyembunyikan informasi file
+- SHA-256 untuk verifikasi integritas
+- Seluruh proses enkripsi dan dekripsi dilakukan client-side
+
+«⚠️ Password tidak disimpan oleh aplikasi. Kehilangan password berarti file tidak dapat didekripsi.»
+
+💾 Streaming & Browser
+
+V3 mendukung streaming untuk mengurangi penggunaan RAM saat memproses file besar.
+
+Direct-to-disk streaming tersedia untuk single-file pada browser yang mendukung File System Access API. Browser lain menggunakan fallback Blob.
+
+V1/V2 hanya didukung untuk kompatibilitas legacy dan memiliki batas ukuran 250 MB.
+
+🛠️ Instalasi
+
+Tidak membutuhkan Node.js atau backend.
+
 git clone https://github.com/valmortheos/VlmrsTool.git
-
-# Masuk ke direktori
 cd VlmrsTool
 
-# Buka di browser default
-# Windows
-start index.html
+Kemudian buka "index.html" di browser modern.
 
-# macOS
-open index.html
+Local server juga dapat digunakan:
 
-# Linux
-xdg-open index.html
-```
-
-#### Metode 2: Download ZIP
-
-1. Klik tombol **Code** → **Download ZIP** di GitHub
-2. Extract file ZIP ke folder manapun
-3. Buka `index.html` dengan double-click
-
-#### Metode 3: Local Server (Opsional)
-
-Jika ingin menggunakan local server (lebih direkomendasikan untuk development):
-
-```bash
-# Menggunakan Python 3
 python -m http.server 8080
 
-# Atau menggunakan Node.js
-npx serve .
+📁 Struktur
 
-# Lalu buka di browser
-# http://localhost:8080
-```
-
-> 💡 **Tip**: Metode 1 atau 2 sudah cukup untuk penggunaan normal. Local server hanya diperlukan jika ingin development atau testing.
-
-## 🚀 Cara Pakai
-
-### Encode
-1. Buka tab **Encoder**
-2. Drop file (atau klik untuk browse) — bisa multiple
-3. Masukkan password kuat
-4. Klik **Encode All Files**
-5. Download hasilnya — individual atau ZIP
-
-### Decode
-1. Buka tab **Decoder**
-2. Drop file `.vlmrs`
-3. Masukkan password yang sama
-4. Klik **Decode & Preview All**
-5. Preview dan download file asli
-
-## 🔧 Struktur File
-
-```
-vlmrs-tool/
-├── index.html      # Markup utama
-├── style.css       # Styling
-├── script.js       # Logika encode/decode
+VlmrsTool/
+├── index.html
+├── style.css
+├── script.js
+├── vlmrs-streaming.js
 └── README.md
-```
 
-## 📐 Format VLMRS
+🌐 Browser Support
 
-```
-Header (15 bytes)
-├── Magic: "VLMR" (4 bytes)
-├── Version: 1 (1 byte)
-├── Salt Length: 16 (1 byte)
-├── IV Length: 12 (1 byte)
-├── Encrypted Meta Length (4 bytes, LE)
-└── Iterations (4 bytes, LE)
+Browser| Support
+Chrome| ✅
+Edge| ✅
+Firefox| ✅
+Safari| ✅
 
-Payload
-├── Salt (16 bytes)
-├── IV (12 bytes)
-├── Encrypted Metadata (AES-GCM)
-└── File Ciphertext (AES-GCM)
-```
+📦 Dependencies
 
-## 🛡️ Keamanan
+- JSZip — bulk ZIP download
+- Web Crypto API — cryptographic operations
+- Vanilla JavaScript
 
-- **AES-256-GCM** menyediakan enkripsi + autentikasi
-- **PBKDF2-HMAC-SHA-256** dengan 100.000 iterasi + salt unik per file
-- **AAD terpisah** untuk metadata dan file mencegah tampering
-- **Semua proses client-side** — zero upload, zero server
-- **Metadata tersembunyi** — nama file, ukuran, dan info lainnya terenkripsi
+📄 Lisensi
 
-> ⚠️ **Peringatan**: File > 200 MB dapat menyebabkan lag browser karena keterbatasan memori.
-
-## 📦 Dependencies
-
-- [JSZip](https://stuk.github.io/jszip/) — untuk bulk download ZIP (CDN)
-- Sisanya vanilla JavaScript + Web Crypto API
-
-## 🖥️ Browser Support
-
-| Browser | Support |
-|---------|---------|
-| Chrome  | ✅      |
-| Firefox | ✅      |
-| Safari  | ✅      |
-| Edge    | ✅      |
-
-## 🤝 Kontribusi
-
-Pull request selalu diterima! Untuk perubahan besar, buka issue dulu untuk diskusi.
-
-## 📄 Lisensi
-
-MIT — bebas dipakai, dimodifikasi, dan didistribusikan.
+MIT — bebas digunakan, dimodifikasi, dan didistribusikan.
 
 ---
 
