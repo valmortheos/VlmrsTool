@@ -611,33 +611,58 @@ const startEncoding = async () => {
                 updateProgress('enc', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
             });
 
-            const readableStream = new ReadableStream({
-                async pull(controller) {
-                    try {
-                        const { value, done } = await streamGen.next();
-                        if (done) {
-                            controller.close();
-                        } else {
-                            controller.enqueue(value);
-                        }
-                    } catch (e) {
-                        controller.error(e);
-                    }
-                }
-            });
+            let finalBlob;
+            let usedDiskStream = false;
 
-            const finalBlob = await new Response(readableStream, {
-                headers: { "Content-Type": "application/octet-stream" }
-            }).blob();
+            // Direct File System Access API disk streaming if available
+            if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: origName + '.vlmrs',
+                        types: [{ description: 'VLMRS Encrypted Container', accept: { 'application/octet-stream': ['.vlmrs'] } }]
+                    });
+                    const writable = await handle.createWritable();
+                    try {
+                        for await (const chunkBytes of streamGen) {
+                            await writable.write(chunkBytes);
+                        }
+                        await writable.close();
+                        usedDiskStream = true;
+                    } catch (writeErr) {
+                        await writable.abort();
+                        throw writeErr;
+                    }
+                } catch (pickerErr) {
+                    if (pickerErr.name === 'AbortError') throw new Error("Encoding cancelled by user.");
+                    console.warn("Direct disk streaming picker skipped or failed, using Blob fallback:", pickerErr.message);
+                }
+            }
+
+            if (!usedDiskStream) {
+                const readableStream = new ReadableStream({
+                    async pull(controller) {
+                        try {
+                            const { value, done } = await streamGen.next();
+                            if (done) controller.close();
+                            else controller.enqueue(value);
+                        } catch (e) { controller.error(e); }
+                    }
+                });
+                finalBlob = await new Response(readableStream, {
+                    headers: { "Content-Type": "application/octet-stream" }
+                }).blob();
+            } else {
+                finalBlob = new Blob([], { type: "application/octet-stream" });
+            }
+
             const blobUrl = URL.createObjectURL(finalBlob);
-            
             encodedBlobUrls.push(blobUrl);
             currentEncodeResults.push({
                 blob: finalBlob,
                 url: blobUrl,
                 originalName: origName + origExt,
                 encodedName: origName + '.vlmrs',
-                size: finalBlob.size,
+                size: finalBlob.size || file.size,
                 metadata: { vlmrsVersion: 3, encryption: "AES-256-GCM", tool: "VLMRS Encoder", credit: "@valmortheos" },
                 name: origName + origExt,
                 type: 'application/octet-stream'
@@ -936,7 +961,7 @@ const startDecoding = async () => {
             let blob;
 
             if (version === 3) {
-                // Streaming decode V3 - O(1) RAM chunk processing
+                // Streaming decode V3
                 const streamGen = decodeV3Stream(file, pass, (ratio, msg) => {
                     const fileProgress = ((i + ratio) / totalFiles) * 100;
                     updateProgress('dec', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
@@ -947,6 +972,8 @@ const startDecoding = async () => {
                 if (!firstResult.done && firstResult.value.type === 'metadata') {
                     metadata = firstResult.value.metadata;
                 }
+
+                let defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '');
 
                 // Determine restored MIME type
                 let restoredMimeType = 'application/octet-stream';
@@ -965,26 +992,50 @@ const startDecoding = async () => {
                     restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
                 }
 
-                const decryptedReadableStream = new ReadableStream({
-                    async pull(controller) {
+                let usedDiskStream = false;
+
+                // Direct File System Access API disk streaming if available
+                if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                    try {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: defaultName,
+                            types: [{ description: 'Decrypted File', accept: { [restoredMimeType]: ['.' + (metadata.extension || 'bin').replace(/^\./, '')] } }]
+                        });
+                        const writable = await handle.createWritable();
                         try {
-                            const { value, done } = await streamGen.next();
-                            if (done) {
-                                controller.close();
-                            } else {
-                                if (value && value.type === 'chunk') {
-                                    controller.enqueue(value.data);
+                            for await (const item of streamGen) {
+                                if (item.type === 'chunk') {
+                                    await writable.write(item.data);
                                 }
                             }
-                        } catch (e) {
-                            controller.error(e);
+                            await writable.close();
+                            usedDiskStream = true;
+                        } catch (writeErr) {
+                            await writable.abort();
+                            throw writeErr;
                         }
+                    } catch (pickerErr) {
+                        if (pickerErr.name === 'AbortError') throw new Error("Decryption cancelled by user.");
+                        console.warn("Direct disk streaming picker skipped or failed, using Blob fallback:", pickerErr.message);
                     }
-                });
+                }
 
-                blob = await new Response(decryptedReadableStream, {
-                    headers: { "Content-Type": restoredMimeType }
-                }).blob();
+                if (!usedDiskStream) {
+                    const decryptedReadableStream = new ReadableStream({
+                        async pull(controller) {
+                            try {
+                                const { value, done } = await streamGen.next();
+                                if (done) controller.close();
+                                else if (value && value.type === 'chunk') controller.enqueue(value.data);
+                            } catch (e) { controller.error(e); }
+                        }
+                    });
+                    blob = await new Response(decryptedReadableStream, {
+                        headers: { "Content-Type": restoredMimeType }
+                    }).blob();
+                } else {
+                    blob = new Blob([], { type: restoredMimeType });
+                }
             } else {
                 if (file.size > 250 * 1024 * 1024) {
                     throw new Error(`File ${file.name} exceeds the 250 MB RAM safe limit for legacy V1/V2 full-buffer decoding.`);
