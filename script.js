@@ -616,10 +616,11 @@ const startEncoding = async () => {
             await sleep(10);
             const fileHash = await calculateSHA256(fileBuf);
             
-            // Metadata
+            // Metadata (sensitive original MIME type stored encrypted)
             const meta = {
                 filename: origName,
                 extension: origExt,
+                mimeType: file.type || 'application/octet-stream',
                 timestamp: Date.now(),
                 vlmrsVersion: 1,
                 encryption: "AES-256-GCM",
@@ -1125,7 +1126,25 @@ const startDecoding = async () => {
                 defaultName = originalFile ? originalFile.name.replace(/\.vlmrs$/i, '') : `decrypted_${i + 1}`;
             }
             
-            const blob = new Blob([decryptedBuf]);
+            // Determine original MIME type only after successful decryption and verification
+            let restoredMimeType = 'application/octet-stream';
+            if (metadata && metadata.mimeType) {
+                restoredMimeType = metadata.mimeType;
+            } else if (metadata && metadata.extension) {
+                // Backward compatibility for legacy .vlmrs files missing metadata.mimeType
+                const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
+                const mimeMap = {
+                    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                    'webp': 'image/webp', 'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon',
+                    'mp4': 'video/mp4', 'webm': 'video/webm', 'ogg': 'video/ogg', 'mov': 'video/quicktime',
+                    'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'flac': 'audio/flac',
+                    'pdf': 'application/pdf', 'txt': 'text/plain', 'html': 'text/html', 'css': 'text/css',
+                    'js': 'text/javascript', 'json': 'application/json', 'csv': 'text/csv', 'zip': 'application/zip'
+                };
+                restoredMimeType = mimeMap[cleanExt] || 'application/octet-stream';
+            }
+
+            const blob = new Blob([decryptedBuf], { type: restoredMimeType });
             const blobUrl = URL.createObjectURL(blob);
             
             decryptedBlobs.push(blobUrl);
@@ -1137,7 +1156,7 @@ const startDecoding = async () => {
                 metadata: metadata || {},
                 hashVerified: hashVerified,
                 name: defaultName,
-                type: 'application/octet-stream'
+                type: restoredMimeType
             });
             
             const finalProgress = ((i + 1) / totalFiles) * 100;
@@ -1220,6 +1239,9 @@ const displayDecryptedPreviews = (files) => {
         
         if (metadata.filename) {
             detailItems['Filename'] = metadata.filename + (metadata.extension || '');
+        }
+        if (metadata.mimeType || file.type) {
+            detailItems['Original MIME Type'] = metadata.mimeType || file.type;
         }
         if (metadata.timestamp) {
             detailItems['Encrypted On'] = new Date(metadata.timestamp).toLocaleString();
