@@ -141,6 +141,14 @@ export async function* encodeV3Stream(file, password, iterations = 100000, onPro
     const totalSize = file.size;
     const cryptoObj = (typeof window !== 'undefined' && window.crypto) ? window.crypto : (await import('crypto')).webcrypto;
 
+    if (!cryptoObj || !cryptoObj.subtle) {
+        throw new Error("Web Crypto API (crypto.subtle) is unavailable. Please access this application via HTTPS or a modern secure browser context.");
+    }
+
+    if (iterations < 1000 || iterations > 2000000) {
+        throw new Error("PBKDF2 iterations out of safe bounds (must be between 1,000 and 2,000,000)");
+    }
+
     // 1. Calculate file SHA-256 progressively
     const fileHash = await calculateSHA256Progressive(file, (done, total) => {
         if (onProgress) onProgress(0.2 * (done / total), `Hashing file...`);
@@ -265,6 +273,10 @@ export async function* encodeV3Stream(file, password, iterations = 100000, onPro
 export async function* decodeV3Stream(fileOrBlob, password, onProgress = null) {
     const cryptoObj = (typeof window !== 'undefined' && window.crypto) ? window.crypto : (await import('crypto')).webcrypto;
 
+    if (!cryptoObj || !cryptoObj.subtle) {
+        throw new Error("Web Crypto API (crypto.subtle) is unavailable. Please access this application via HTTPS or a modern secure browser context.");
+    }
+
     // Read header & encrypted metadata
     const headerSlice = fileOrBlob.slice(0, 15);
     const headerBuf = await headerSlice.arrayBuffer();
@@ -286,6 +298,17 @@ export async function* decodeV3Stream(fileOrBlob, password, onProgress = null) {
     const ivLen = header8[6];
     const encryptedMetaLen = headerView.getUint32(7, true);
     const iterations = headerView.getUint32(11, true);
+
+    // Header validation inside stream decoder
+    if (saltLen !== 16 || ivLen !== 12) {
+        throw new Error("Invalid header parameters: saltLen or ivLen out of spec");
+    }
+    if (iterations < 1000 || iterations > 2000000) {
+        throw new Error("PBKDF2 iterations out of safe bounds (must be between 1,000 and 2,000,000)");
+    }
+    if (encryptedMetaLen < 16 || encryptedMetaLen > 100 * 1024 * 1024) {
+        throw new Error("Invalid encryptedMetaLen parameter");
+    }
 
     const initHeaderTotal = 15 + saltLen + ivLen + encryptedMetaLen;
     const initSlice = fileOrBlob.slice(0, initHeaderTotal);

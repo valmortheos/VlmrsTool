@@ -775,7 +775,11 @@ const handleDecFileSelect = async (files) => {
             const encryptedMetaLen = headerView.getUint32(7, true);
             const iterations = headerView.getUint32(11, true);
             
-            if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || encryptedMetaLen === 0 || encryptedMetaLen > 100 * 1024 * 1024) {
+            if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || iterations > 2000000 || encryptedMetaLen < 16 || encryptedMetaLen > 100 * 1024 * 1024) {
+                continue;
+            }
+            if ((version === 1 || version === 2) && file.size > 250 * 1024 * 1024) {
+                console.warn(`File ${file.name} exceeds 250 MB RAM safe limit for legacy v1/v2 decoding.`);
                 continue;
             }
             
@@ -932,6 +936,10 @@ const startDecoding = async () => {
                     }
                 }
             } else {
+                if (file.size > 250 * 1024 * 1024) {
+                    throw new Error(`File ${file.name} exceeds the 250 MB RAM safe limit for legacy V1/V2 full-buffer decoding.`);
+                }
+
                 // Legacy v1 & v2 decoding
                 const fullBuffer = await file.arrayBuffer();
                 const headerView = new DataView(fullBuffer);
@@ -939,6 +947,10 @@ const startDecoding = async () => {
                 const ivLen = header8[6];
                 const encryptedMetaLen = headerView.getUint32(7, true);
                 const iterations = headerView.getUint32(11, true);
+
+                if (saltLen !== 16 || ivLen !== 12 || iterations < 1000 || iterations > 2000000 || encryptedMetaLen < 16) {
+                    throw new Error("Invalid or unsafe header parameters in legacy container");
+                }
 
                 const salt = new Uint8Array(fullBuffer.slice(15, 15 + saltLen));
                 let metaIv, fileIv, encMetaStart;
@@ -1028,6 +1040,7 @@ const startDecoding = async () => {
             currentDecodeResults.push({
                 blob: blob,
                 url: blobUrl,
+                originalName: defaultName,
                 filename: defaultName,
                 size: blob.size,
                 metadata: metadata || {},
