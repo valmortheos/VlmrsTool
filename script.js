@@ -629,7 +629,7 @@ const startEncoding = async () => {
                 extension: origExt,
                 mimeType: file.type || 'application/octet-stream',
                 timestamp: Date.now(),
-                vlmrsVersion: 1,
+                vlmrsVersion: 2,
                 encryption: "AES-256-GCM",
                 kdf: { algorithm: "PBKDF2-HMAC-SHA-256", iterations: iterations },
                 tool: "VLMRS Encoder",
@@ -637,6 +637,10 @@ const startEncoding = async () => {
                 fileHash: fileHash
             };
             
+            const salt = crypto.getRandomValues(new Uint8Array(16));
+            const metaIv = crypto.getRandomValues(new Uint8Array(12));
+            const fileIv = crypto.getRandomValues(new Uint8Array(12));
+
             // Derive key with best-effort memory zeroization of password byte array
             const progressKeyStart = baseProgress + 25;
             updateProgress('enc', progressKeyStart, `Deriving key for ${file.name}...`);
@@ -665,7 +669,7 @@ const startEncoding = async () => {
             const finalHeader8 = new Uint8Array(finalHeaderBuf);
             
             finalHeader8[0] = 86; finalHeader8[1] = 76; finalHeader8[2] = 77; finalHeader8[3] = 82;
-            finalHeader8[4] = 1;
+            finalHeader8[4] = 2; // Version 2
             finalHeader8[5] = 16;
             finalHeader8[6] = 12;
             finalHeaderView.setUint32(7, 0, true);
@@ -674,12 +678,12 @@ const startEncoding = async () => {
             // AAD for metadata (encryptedMetaLen = 0)
             const metadataAAD = new Uint8Array(finalHeaderBuf.slice(0));
             
-            // Encrypt metadata
+            // Encrypt metadata with distinct metaIv
             updateProgress('enc', progressKeyStart + 10, `Encrypting metadata for ${file.name}...`);
             await sleep(10);
             
             const encryptedMeta = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: iv, additionalData: metadataAAD },
+                { name: "AES-GCM", iv: metaIv, additionalData: metadataAAD },
                 key,
                 metaBytes
             );
@@ -691,7 +695,7 @@ const startEncoding = async () => {
             // AAD for file (encryptedMetaLen aktual)
             const fileAAD = new Uint8Array(finalHeaderBuf);
             
-            // Encrypt file
+            // Encrypt file with distinct fileIv
             const progressEncStart = baseProgress + 60;
             updateProgress('enc', progressEncStart, `Encrypting ${file.name}...`);
             await sleep(50);
@@ -721,14 +725,14 @@ const startEncoding = async () => {
                 }
                 
                 ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
+                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
                     key,
                     combinedBuf.buffer
                 );
                 combinedBuf.fill(0); // Best-effort zeroize combined plaintext buffer
             } else {
                 ciphertextBuf = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
+                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
                     key,
                     fileBuf
                 );
@@ -737,12 +741,12 @@ const startEncoding = async () => {
             // Best-effort zeroization of plaintext input file buffer
             try { new Uint8Array(fileBuf).fill(0); } catch(e) {}
 
-            // Final assembly
+            // Final assembly: Header(15) + Salt(16) + MetaIV(12) + FileIV(12) + EncryptedMeta + FileCiphertext
             const progressFinalStart = baseProgress + 92;
             updateProgress('enc', progressFinalStart, `Finalizing ${file.name}...`);
             await sleep(50);
             
-            const finalBuf = new Uint8Array(15 + 16 + 12 + encryptedMeta.byteLength + ciphertextBuf.byteLength);
+            const finalBuf = new Uint8Array(15 + 16 + 12 + 12 + encryptedMeta.byteLength + ciphertextBuf.byteLength);
             let offset2 = 0;
             
             finalBuf.set(new Uint8Array(finalHeaderBuf), offset2);
@@ -751,7 +755,10 @@ const startEncoding = async () => {
             finalBuf.set(salt, offset2);
             offset2 += 16;
             
-            finalBuf.set(iv, offset2);
+            finalBuf.set(metaIv, offset2);
+            offset2 += 12;
+
+            finalBuf.set(fileIv, offset2);
             offset2 += 12;
             
             finalBuf.set(new Uint8Array(encryptedMeta), offset2);
@@ -899,7 +906,7 @@ const handleDecFileSelect = async (files) => {
             if (header8[0] !== 86 || header8[1] !== 76 || header8[2] !== 77 || header8[3] !== 82) continue;
             
             const version = header8[4];
-            if (version !== 1) continue;
+            if (version !== 1 && version !== 2) continue;
             
             const saltLen = header8[5];
             const ivLen = header8[6];
@@ -907,7 +914,8 @@ const handleDecFileSelect = async (files) => {
             const iterations = headerView.getUint32(11, true);
             
             const headerLen = 15;
-            const totalHeaderLen = headerLen + saltLen + ivLen + encryptedMetaLen;
+            const ivTotalLen = version === 2 ? (ivLen * 2) : ivLen;
+            const totalHeaderLen = headerLen + saltLen + ivTotalLen + encryptedMetaLen;
             
             if (buffer.byteLength < totalHeaderLen) continue;
             if (encryptedMetaLen === 0) continue;
@@ -1050,11 +1058,25 @@ const startDecoding = async () => {
             const saltEnd = saltStart + saltLen;
             const salt = new Uint8Array(buffer.slice(saltStart, saltEnd));
             
-            const ivStart = saltEnd;
-            const ivEnd = ivStart + ivLen;
-            const iv = new Uint8Array(buffer.slice(ivStart, ivEnd));
+            let metaIv, fileIv, encryptedMetaStart;
+
+            if (version === 1) {
+                const ivStart = saltEnd;
+                const ivEnd = ivStart + ivLen;
+                metaIv = new Uint8Array(buffer.slice(ivStart, ivEnd));
+                fileIv = metaIv;
+                encryptedMetaStart = ivEnd;
+            } else {
+                const metaIvStart = saltEnd;
+                const metaIvEnd = metaIvStart + ivLen;
+                metaIv = new Uint8Array(buffer.slice(metaIvStart, metaIvEnd));
+
+                const fileIvStart = metaIvEnd;
+                const fileIvEnd = fileIvStart + ivLen;
+                fileIv = new Uint8Array(buffer.slice(fileIvStart, fileIvEnd));
+                encryptedMetaStart = fileIvEnd;
+            }
             
-            const encryptedMetaStart = ivEnd;
             const encryptedMetaEnd = encryptedMetaStart + encryptedMetaLen;
             const encryptedMeta = buffer.slice(encryptedMetaStart, encryptedMetaEnd);
             
@@ -1088,7 +1110,7 @@ const startDecoding = async () => {
             let metadata;
             try {
                 const decryptedMetaBuf = await crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: metadataAAD },
+                    { name: "AES-GCM", iv: metaIv, additionalData: metadataAAD },
                     key,
                     encryptedMeta
                 );
@@ -1117,7 +1139,7 @@ const startDecoding = async () => {
             
             try {
                 decryptedBuf = await crypto.subtle.decrypt(
-                    { name: "AES-GCM", iv: iv, additionalData: fileAAD },
+                    { name: "AES-GCM", iv: fileIv, additionalData: fileAAD },
                     key,
                     ciphertext
                 );
@@ -1135,7 +1157,8 @@ const startDecoding = async () => {
                 const decryptedHash = await calculateSHA256(decryptedBuf);
                 hashVerified = decryptedHash === metadata.fileHash;
                 if (!hashVerified) {
-                    console.warn('Hash verification failed for file:', metadata.filename);
+                    try { new Uint8Array(decryptedBuf).fill(0); } catch (e) {}
+                    throw new Error(`File integrity verification failed for ${metadata.filename || 'file'} - hash mismatch!`);
                 }
             }
             
