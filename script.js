@@ -611,34 +611,45 @@ const startEncoding = async () => {
                 updateProgress('enc', fileProgress, `[${i + 1}/${totalFiles}] ${file.name}: ${msg}`);
             });
 
-            let finalBlob;
+            let finalBlob = null;
             let usedDiskStream = false;
+            let streamStarted = false;
+            let writtenBytes = 0;
 
             // Direct File System Access API disk streaming if available
             if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                let handle, writable;
                 try {
-                    const handle = await window.showSaveFilePicker({
+                    handle = await window.showSaveFilePicker({
                         suggestedName: origName + '.vlmrs',
                         types: [{ description: 'VLMRS Encrypted Container', accept: { 'application/octet-stream': ['.vlmrs'] } }]
                     });
-                    const writable = await handle.createWritable();
+                    writable = await handle.createWritable();
+                } catch (pickerErr) {
+                    if (pickerErr.name === 'AbortError') throw new Error("Encoding cancelled by user.");
+                    console.warn("File picker / createWritable failed before stream consumption. Falling back to Blob:", pickerErr.message);
+                }
+
+                if (writable) {
                     try {
                         for await (const chunkBytes of streamGen) {
+                            streamStarted = true;
                             await writable.write(chunkBytes);
+                            writtenBytes += chunkBytes.byteLength;
                         }
                         await writable.close();
                         usedDiskStream = true;
                     } catch (writeErr) {
-                        await writable.abort();
-                        throw writeErr;
+                        try { await writable.abort(); } catch (e) {}
+                        throw new Error("Disk streaming write failed midway: " + writeErr.message);
                     }
-                } catch (pickerErr) {
-                    if (pickerErr.name === 'AbortError') throw new Error("Encoding cancelled by user.");
-                    console.warn("Direct disk streaming picker skipped or failed, using Blob fallback:", pickerErr.message);
                 }
             }
 
             if (!usedDiskStream) {
+                if (streamStarted) {
+                    throw new Error("Disk streaming failed midway after generator started. Cannot fallback to Blob.");
+                }
                 const readableStream = new ReadableStream({
                     async pull(controller) {
                         try {
@@ -651,18 +662,19 @@ const startEncoding = async () => {
                 finalBlob = await new Response(readableStream, {
                     headers: { "Content-Type": "application/octet-stream" }
                 }).blob();
-            } else {
-                finalBlob = new Blob([], { type: "application/octet-stream" });
+                writtenBytes = finalBlob.size;
             }
 
-            const blobUrl = URL.createObjectURL(finalBlob);
-            encodedBlobUrls.push(blobUrl);
+            const blobUrl = finalBlob ? URL.createObjectURL(finalBlob) : null;
+            if (blobUrl) encodedBlobUrls.push(blobUrl);
+
             currentEncodeResults.push({
                 blob: finalBlob,
                 url: blobUrl,
+                savedToDisk: usedDiskStream,
                 originalName: origName + origExt,
                 encodedName: origName + '.vlmrs',
-                size: finalBlob.size || file.size,
+                size: writtenBytes,
                 metadata: { vlmrsVersion: 3, encryption: "AES-256-GCM", tool: "VLMRS Encoder", credit: "@valmortheos" },
                 name: origName + origExt,
                 type: 'application/octet-stream'
@@ -704,7 +716,7 @@ const displayDownloadButtons = (view, files) => {
 
         const labelSpan = document.createElement('span');
         labelSpan.className = 'file-original-label';
-        labelSpan.textContent = `Original: ${file.originalName || file.filename || file.name}`;
+        labelSpan.textContent = `${file.savedToDisk ? 'Saved to Disk' : 'Original'}: ${file.originalName || file.filename || file.name}`;
 
         const sizeSpan = document.createElement('span');
         sizeSpan.style.fontSize = '0.85rem';
@@ -713,25 +725,35 @@ const displayDownloadButtons = (view, files) => {
 
         originalNameDiv.appendChild(labelSpan);
         originalNameDiv.appendChild(sizeSpan);
+
+        if (file.savedToDisk) {
+            const savedBadge = document.createElement('span');
+            savedBadge.style.color = 'var(--accent-color)';
+            savedBadge.style.fontWeight = 'bold';
+            savedBadge.textContent = '✅ Saved directly to file';
+            group.appendChild(originalNameDiv);
+            group.appendChild(savedBadge);
+        } else {
+            const renameInput = document.createElement('input');
+            renameInput.type = 'text';
+            renameInput.className = 'rename-input';
+            renameInput.value = file.encodedName || file.filename || file.name;
+            renameInput.placeholder = 'Enter custom filename...';
+            renameInput.title = 'Edit filename or leave as original';
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'btn btn-success';
+            downloadBtn.textContent = 'Download';
+            downloadBtn.onclick = () => {
+                const customName = renameInput.value.trim() || (file.encodedName || file.filename || file.name);
+                if (file.blob) downloadBlob(file.blob, customName);
+            };
+
+            group.appendChild(originalNameDiv);
+            group.appendChild(renameInput);
+            group.appendChild(downloadBtn);
+        }
         
-        const renameInput = document.createElement('input');
-        renameInput.type = 'text';
-        renameInput.className = 'rename-input';
-        renameInput.value = file.encodedName || file.filename || file.name;
-        renameInput.placeholder = 'Enter custom filename...';
-        renameInput.title = 'Edit filename or leave as original';
-        
-        const downloadBtn = document.createElement('button');
-        downloadBtn.className = 'btn btn-success';
-        downloadBtn.textContent = 'Download';
-        downloadBtn.onclick = () => {
-            const customName = renameInput.value.trim() || (file.encodedName || file.filename || file.name);
-            downloadBlob(file.blob, customName);
-        };
-        
-        group.appendChild(originalNameDiv);
-        group.appendChild(renameInput);
-        group.appendChild(downloadBtn);
         downloadArea.appendChild(group);
     });
     
@@ -975,10 +997,10 @@ const startDecoding = async () => {
 
                 let defaultName = (metadata && metadata.filename && metadata.extension) ? (metadata.filename + metadata.extension) : file.name.replace(/\.vlmrs$/i, '');
 
-                // Determine restored MIME type
+                // Determine restored MIME type and sanitize (strip ; charset=...)
                 let restoredMimeType = 'application/octet-stream';
                 if (metadata && metadata.mimeType) {
-                    restoredMimeType = metadata.mimeType;
+                    restoredMimeType = metadata.mimeType.split(';')[0].trim() || 'application/octet-stream';
                 } else if (metadata && metadata.extension) {
                     const cleanExt = metadata.extension.replace(/^\./, '').toLowerCase();
                     const mimeMap = {
@@ -993,34 +1015,46 @@ const startDecoding = async () => {
                 }
 
                 let usedDiskStream = false;
+                let streamStarted = false;
+                let writtenBytes = 0;
 
                 // Direct File System Access API disk streaming if available
                 if (typeof window !== 'undefined' && 'showSaveFilePicker' in window && totalFiles === 1) {
+                    let handle, writable;
                     try {
-                        const handle = await window.showSaveFilePicker({
+                        const sanitizedMimeForPicker = restoredMimeType.includes('/') ? restoredMimeType : 'application/octet-stream';
+                        handle = await window.showSaveFilePicker({
                             suggestedName: defaultName,
-                            types: [{ description: 'Decrypted File', accept: { [restoredMimeType]: ['.' + (metadata.extension || 'bin').replace(/^\./, '')] } }]
+                            types: [{ description: 'Decrypted File', accept: { [sanitizedMimeForPicker]: ['.' + (metadata.extension || 'bin').replace(/^\./, '')] } }]
                         });
-                        const writable = await handle.createWritable();
+                        writable = await handle.createWritable();
+                    } catch (pickerErr) {
+                        if (pickerErr.name === 'AbortError') throw new Error("Decryption cancelled by user.");
+                        console.warn("File picker / createWritable failed before stream consumption. Falling back to Blob:", pickerErr.message);
+                    }
+
+                    if (writable) {
                         try {
                             for await (const item of streamGen) {
                                 if (item.type === 'chunk') {
+                                    streamStarted = true;
                                     await writable.write(item.data);
+                                    writtenBytes += item.data.byteLength;
                                 }
                             }
                             await writable.close();
                             usedDiskStream = true;
                         } catch (writeErr) {
-                            await writable.abort();
-                            throw writeErr;
+                            try { await writable.abort(); } catch (e) {}
+                            throw new Error("Disk streaming write failed midway: " + writeErr.message);
                         }
-                    } catch (pickerErr) {
-                        if (pickerErr.name === 'AbortError') throw new Error("Decryption cancelled by user.");
-                        console.warn("Direct disk streaming picker skipped or failed, using Blob fallback:", pickerErr.message);
                     }
                 }
 
                 if (!usedDiskStream) {
+                    if (streamStarted) {
+                        throw new Error("Disk streaming failed midway after generator started. Cannot fallback to Blob.");
+                    }
                     const decryptedReadableStream = new ReadableStream({
                         async pull(controller) {
                             try {
@@ -1033,8 +1067,9 @@ const startDecoding = async () => {
                     blob = await new Response(decryptedReadableStream, {
                         headers: { "Content-Type": restoredMimeType }
                     }).blob();
+                    writtenBytes = blob.size;
                 } else {
-                    blob = new Blob([], { type: restoredMimeType });
+                    blob = null;
                 }
             } else {
                 if (file.size > 250 * 1024 * 1024) {
@@ -1141,9 +1176,10 @@ const startDecoding = async () => {
             currentDecodeResults.push({
                 blob: blob,
                 url: blobUrl,
+                savedToDisk: usedDiskStream,
                 originalName: defaultName,
                 filename: defaultName,
-                size: blob.size,
+                size: writtenBytes,
                 metadata: metadata || {},
                 hashVerified: true,
                 name: defaultName,
